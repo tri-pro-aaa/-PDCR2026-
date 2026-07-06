@@ -1084,7 +1084,7 @@ DEPTS.forEach(d=>activeWeek[d]="all");
 
 /* 表示オプション: {事業部: {daily,plan,lastyear,diff,weekly}} */
 let opts = {};
-DEPTS.forEach(d=>opts[d]={daily:true,plan:true,lastyear:true,diff:false,weekly:false,budgetRatio:true,lyRaw:true,weather:true});
+DEPTS.forEach(d=>opts[d]={daily:true,plan:true,lastyear:true,diff:false,weekly:false,budgetRatio:true,lyRaw:true,weather:true,planBudgetRatio:false,planLyRatio:false});
 
 /* ============================================================
    SCC（ストアコンディションチェック）
@@ -3165,6 +3165,11 @@ const CHANGELOG = [
     author: "Claude",
     content: "リアルタイム同期の不具合を修正。実績・計画をまとめて送信する際、同じ隠しフォームを使い回していたため、実績の送信内容が直後の計画送信で上書きされ、実績データが一度もスプレッドシートに届いていなかった。送信のたびに使い捨てのフォーム／iframeを作成する方式に変更。あわせて、過去に送信できていなかったデータを復旧できるよう、設定タブに「ローカルの全データを送り直す」ボタンを追加。"
   },
+  {
+    date: "2026-07-06",
+    author: "Claude",
+    content: "「計画」が予算・昨年実績に対してどれくらいの比率かを確認できる「計画の予算比」「計画の昇対比」列を追加（日次テーブル・週次/月次サマリーテーブル両方）。表示切り替えボタンで必要なときだけオン/オフできる（デフォルトはOFF）。"
+  },
 ];
 
 function renderChangelog(){
@@ -4159,6 +4164,9 @@ function buildDeptHTML(dept){
       <button class="btn-sm wsc-toggle" id="wsc-budgetRatio-${dept}" onclick="toggleWSCol('${dept}','budgetRatio')">予算比</button>
       <button class="btn-sm wsc-toggle" id="wsc-planRatio-${dept}" onclick="toggleWSCol('${dept}','planRatio')">計画比</button>
       <button class="btn-sm wsc-toggle" id="wsc-lyRatio-${dept}" onclick="toggleWSCol('${dept}','lyRatio')">昨対比</button>
+      <div class="vline"></div>
+      <button class="btn-sm wsc-toggle" id="wsc-planBudgetRatio-${dept}" onclick="toggleWSCol('${dept}','planBudgetRatio')">計画の予算比</button>
+      <button class="btn-sm wsc-toggle" id="wsc-planLyRatio-${dept}" onclick="toggleWSCol('${dept}','planLyRatio')">計画の昇対比</button>
     </div>
     <div class="tbl-wrap">
       <table id="week-summary-${dept}"><thead></thead><tbody></tbody></table>
@@ -4198,6 +4206,9 @@ function buildDeptHTML(dept){
     <button class="pill on" id="tog-${dept}-lastyear" onclick="togOpt('${dept}','lastyear')">昨年比</button>
     <button class="pill"    id="tog-${dept}-diff"     onclick="togOpt('${dept}','diff')">差異額</button>
     <button class="pill"    id="tog-${dept}-weekly"   onclick="togOpt('${dept}','weekly')">週次のみ</button>
+    <div class="vline"></div>
+    <button class="pill"    id="tog-${dept}-planBudgetRatio" onclick="togOpt('${dept}','planBudgetRatio')">計画の予算比</button>
+    <button class="pill"    id="tog-${dept}-planLyRatio"     onclick="togOpt('${dept}','planLyRatio')">計画の昇対比</button>
   </div>
   <div id="tbl-weeks-${dept}"></div>`;
 }
@@ -4248,9 +4259,11 @@ const WSC_COLS = [
   {key:"budgetRatio", label:"予算比"},
   {key:"planRatio",   label:"計画比"},
   {key:"lyRatio",     label:"昨対比"},
+  {key:"planBudgetRatio", label:"計画の予算比"},
+  {key:"planLyRatio",     label:"計画の昇対比"},
 ];
 function wscInit(dept){
-  if(!wscState[dept]) wscState[dept]={budget:true,lyRaw:true,plan:true,actual:true,budgetRatio:true,planRatio:true,lyRatio:true};
+  if(!wscState[dept]) wscState[dept]={budget:true,lyRaw:true,plan:true,actual:true,budgetRatio:true,planRatio:true,lyRatio:true,planBudgetRatio:false,planLyRatio:false};
 }
 function toggleWSCol(dept,key){
   wscInit(dept);
@@ -4280,7 +4293,9 @@ function renderDeptWeekSummary(dept){
     const r=ratioW(dept,s,ds);
     const br=a!=null&&b?a/b:null;
     const ly=sumL(dept,s,ds), lyr=a!=null&&ly?a/ly:null;
-    return {budget:b, lyRaw:ly, plan:p, actual:a, budgetRatio:br, planRatio:r, lyRatio:lyr};
+    const pbr=p!=null&&b?p/b:null;
+    const plyr=p!=null&&ly?p/ly:null;
+    return {budget:b, lyRaw:ly, plan:p, actual:a, budgetRatio:br, planRatio:r, lyRatio:lyr, planBudgetRatio:pbr, planLyRatio:plyr};
   }
   function calcTotal(ds){
     let tb=0,tp=0,ta=0,tl=0,hasTa=false;
@@ -4293,7 +4308,9 @@ function renderDeptWeekSummary(dept){
     const r=hasTa&&tp?ta/tp:null;
     const br=hasTa&&tb?ta/tb:null;
     const lyr=hasTa&&tl?ta/tl:null;
-    return {budget:tb, lyRaw:tl, plan:tp, actual:hasTa?ta:null, budgetRatio:br, planRatio:r, lyRatio:lyr};
+    const pbr=tp&&tb?tp/tb:null;
+    const plyr=tp&&tl?tp/tl:null;
+    return {budget:tb, lyRaw:tl, plan:tp, actual:hasTa?ta:null, budgetRatio:br, planRatio:r, lyRatio:lyr, planBudgetRatio:pbr, planLyRatio:plyr};
   }
   function cellHtml(row,key){
     if(key==="budget")      return `<td class="sep">${f(row.budget||null)}</td>`;
@@ -4303,6 +4320,8 @@ function renderDeptWeekSummary(dept){
     if(key==="budgetRatio") return `<td class="${rc(row.budgetRatio)}">${fr(row.budgetRatio)}</td>`;
     if(key==="planRatio")   return `<td class="${rc(row.planRatio)}">${fr(row.planRatio)}</td>`;
     if(key==="lyRatio")     return `<td class="${rc(row.lyRatio)}">${fr(row.lyRatio)}</td>`;
+    if(key==="planBudgetRatio") return `<td class="${rc(row.planBudgetRatio)}" style="color:#6a1b9a">${fr(row.planBudgetRatio)}</td>`;
+    if(key==="planLyRatio")     return `<td class="${rc(row.planLyRatio)}" style="color:#6a1b9a">${fr(row.planLyRatio)}</td>`;
     return "<td></td>";
   }
 
@@ -4440,12 +4459,13 @@ function renderDeptTabs(dept){
 
 function renderDeptTable(dept){
   const m=getMonth(),days=daysInMonth(2026,m);
-  const {daily,plan,lastyear,diff,weekly,budgetRatio,lyRaw,weather}=opts[dept];
+  const {daily,plan,lastyear,diff,weekly,budgetRatio,lyRaw,weather,planBudgetRatio,planLyRatio}=opts[dept];
   const aw=activeWeek[dept];
   const wis=aw==="all"?getWeeks().map((_,i)=>i).filter(i=>getWeeks()[i].s<=days):[aw];
   let span=2;
   if(daily&&!weekly)span++;if(lyRaw&&!weekly)span++;if(plan&&!weekly)span++;
   if(budgetRatio)span++;if(lastyear)span++;if(diff)span++;
+  if(planBudgetRatio)span++;if(planLyRatio)span++;
 
   /* 天気データを必要に応じて取得（昨年同月の実測・今年の予報） */
   if(weather){
@@ -4471,6 +4491,8 @@ function renderDeptTable(dept){
     h+=`<th style="min-width:50px">計画比</th>`;
     if(lastyear) h+=`<th>昨対比</th>`;
     if(diff)     h+=`<th>差異</th>`;
+    if(planBudgetRatio) h+=`<th style="min-width:60px;color:#6a1b9a">計画の予算比</th>`;
+    if(planLyRatio)     h+=`<th style="min-width:60px;color:#6a1b9a">計画の昇対比</th>`;
     return h;
   };
   thead+=headCellsBlock();
@@ -4504,6 +4526,8 @@ function renderDeptTable(dept){
           const dbr=dta!=null&&dtb?dta/dtb:null;
           const dlyr=dta!=null&&dtl?dta/dtl:null;
           const ddv=dta!=null?dta-dbase:null;
+          const dpbr=dtp!=null&&dtb?dtp/dtb:null;
+          const dplyr=dtp!=null&&dtl?dtp/dtl:null;
           if(daily) tbody+=`<td class="sep" style="color:#aaa;font-weight:500">${f(dtb||null)}</td>`;
           if(lyRaw) tbody+=`<td class="${daily?'':'sep'}" style="color:#999;font-weight:500">${f(dtl||null)}</td>`;
           if(plan)  tbody+=`<td class="${!daily&&!lyRaw?'sep':''}" style="color:#6a1b9a;font-weight:500">${f(dtp)}</td>`;
@@ -4513,12 +4537,16 @@ function renderDeptTable(dept){
           tbody+=`<td class="${rc(dr)}" style="font-weight:500">${fr(dr)}</td>`;
           if(lastyear) tbody+=`<td class="${rc(dlyr)}" style="font-weight:500">${fr(dlyr)}</td>`;
           if(diff)     tbody+=`<td class="${dc(ddv)}" style="font-weight:500">${fd(ddv)}</td>`;
+          if(planBudgetRatio) tbody+=`<td class="${rc(dpbr)}" style="font-weight:500;color:#6a1b9a">${fr(dpbr)}</td>`;
+          if(planLyRatio)     tbody+=`<td class="${rc(dplyr)}" style="font-weight:500;color:#6a1b9a">${fr(dplyr)}</td>`;
         }
         stores.forEach((s,si)=>{
           const bd=getBD(s,d,dept),b=bd?.budget,ly=bd?.ly;
           const p=plans[dept]?.[s]?.[d],a=getVal(dept,s,d),auto=isLY(dept,s,d);
           const r=ratio(dept,s,d),lyr=a!=null&&ly?a/ly:null,dv=a!=null?a-(p!=null?p:b):null;
           const br=a!=null&&b?a/b:null;
+          const pbr=p!=null&&b?p/b:null;
+          const plyr=p!=null&&ly?p/ly:null;
           if(daily) tbody+=`<td class="${si===0?'sep':''}" style="color:#aaa">${f(b)}</td>`;
           if(lyRaw) tbody+=`<td class="${!daily&&si===0?'sep':''}" style="color:#999">${f(ly)}</td>`;
           if(plan)  tbody+=`<td class="${!daily&&!lyRaw&&si===0?'sep':''}"><input class="pi" type="number" value="${p!=null?p:''}" placeholder="—" onchange="up2('${dept}','${s}',${d},this.value)" onkeydown="if(event.key==='Enter'){up2('${dept}','${s}',${d},this.value);this.blur()}"></td>`;
@@ -4528,6 +4556,8 @@ function renderDeptTable(dept){
           tbody+=`<td class="${rc(r)}">${fr(r)}</td>`;
           if(lastyear) tbody+=`<td class="${rc(lyr)}">${fr(lyr)}</td>`;
           if(diff)     tbody+=`<td class="${dc(dv)}">${fd(dv)}</td>`;
+          if(planBudgetRatio) tbody+=`<td class="${rc(pbr)}" style="color:#6a1b9a">${fr(pbr)}</td>`;
+          if(planLyRatio)     tbody+=`<td class="${rc(plyr)}" style="color:#6a1b9a">${fr(plyr)}</td>`;
         });
         tbody+=`</tr>`;
       });
@@ -4543,6 +4573,8 @@ function renderDeptTable(dept){
       const dbr=dta!=null&&dtb?dta/dtb:null;
       const dlyr=dta!=null&&dtl?dta/dtl:null;
       const ddv=dta!=null?dta-dbase:null;
+      const dpbr=dtp!=null&&dtb?dtp/dtb:null;
+      const dplyr=dtp!=null&&dtl?dtp/dtl:null;
       if(daily&&!weekly) tbody+=`<td class="sep" style="color:#aaa">${f(dtb)}</td>`;
       if(lyRaw&&!weekly) tbody+=`<td class="${daily&&!weekly?'':'sep'}" style="color:#999">${f(dtl)}</td>`;
       if(plan&&!weekly)  tbody+=`<td class="${!(daily&&!weekly)&&!(lyRaw&&!weekly)?'sep':''}" style="color:#6a1b9a">${f(dtp)}</td>`;
@@ -4552,11 +4584,15 @@ function renderDeptTable(dept){
       tbody+=`<td class="${rc(dr)}">${fr(dr)}</td>`;
       if(lastyear) tbody+=`<td class="${rc(dlyr)}">${fr(dlyr)}</td>`;
       if(diff)     tbody+=`<td class="${dc(ddv)}">${fd(ddv)}</td>`;
+      if(planBudgetRatio) tbody+=`<td class="${rc(dpbr)}" style="color:#6a1b9a">${fr(dpbr)}</td>`;
+      if(planLyRatio)     tbody+=`<td class="${rc(dplyr)}" style="color:#6a1b9a">${fr(dplyr)}</td>`;
     }
     stores.forEach(s=>{
       const b=sumB(dept,s,wd),a=sumA(dept,s,wd),ly=sumL(dept,s,wd),p=sumP(dept,s,wd);
       const r=ratioW(dept,s,wd),lyr=a!=null&&ly?a/ly:null,dv=a!=null?a-(p!=null?p:b):null;
       const br=a!=null&&b?a/b:null;
+      const pbr=p!=null&&b?p/b:null;
+      const plyr=p!=null&&ly?p/ly:null;
       if(daily&&!weekly) tbody+=`<td style="color:#aaa">${f(b)}</td>`;
       if(lyRaw&&!weekly) tbody+=`<td style="color:#999">${f(ly)}</td>`;
       if(plan&&!weekly)  tbody+=`<td style="color:#6a1b9a">${f(p)}</td>`;
@@ -4566,6 +4602,8 @@ function renderDeptTable(dept){
       tbody+=`<td class="${rc(r)}">${fr(r)}</td>`;
       if(lastyear) tbody+=`<td class="${rc(lyr)}">${fr(lyr)}</td>`;
       if(diff)     tbody+=`<td class="${dc(dv)}">${fd(dv)}</td>`;
+      if(planBudgetRatio) tbody+=`<td class="${rc(pbr)}" style="color:#6a1b9a">${fr(pbr)}</td>`;
+      if(planLyRatio)     tbody+=`<td class="${rc(plyr)}" style="color:#6a1b9a">${fr(plyr)}</td>`;
     });
     tbody+=`</tr>`;
 
