@@ -3240,6 +3240,11 @@ const CHANGELOG = [
     author: "Claude",
     content: "週次PDCA欄（「作戦・目標」「振り返り・来週対策」コメント）が、savePDCA関数でローカル保存のみ行われスプレッドシートへの同期処理が呼ばれておらず、他の端末に入力内容が反映されない不具合を修正。あわせて「ローカルの全データを送り直す」ボタンでも、過去に入力済みのPDCAコメントを送信し直せるよう対応。"
   },
+  {
+    date: "2026-07-06",
+    author: "Claude",
+    content: "「実績を消去」機能が計画一括入力バーと同じ行にあり、画面幅によって折り返され、日付選択とボタンが離れて見づらかったため、独立した専用バー（下段）に分離した。"
+  },
 ];
 
 function renderChangelog(){
@@ -4276,8 +4281,11 @@ function buildDeptHTML(dept){
     <button class="btn-sm" onclick="bulkFill('${dept}',document.getElementById('bulk-base-${dept}').value)">計画を一括入力</button>
     <div class="vline"></div>
     <button class="btn-sm" style="color:#c62828" onclick="bulkClear('${dept}')">計画を消去</button>
-    <div class="vline"></div>
-    <span style="font-size:11px;color:#888">実績を消去：</span>
+  </div>
+
+  <!-- 実績を消去バー（計画バーとは別行にして、日付選択とボタンが離れて見えないようにする） -->
+  <div class="bulk-bar">
+    <span class="bulk-title">🗑 実績を消去</span>
     <span style="font-size:11px;color:#888">開始日</span>
     <select class="sm" id="bulk-actual-from-${dept}">${dayOptsFrom}</select>
     <span style="font-size:11px;color:#888">〜</span>
