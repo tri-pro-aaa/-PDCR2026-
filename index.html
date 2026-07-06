@@ -2208,13 +2208,21 @@ function sbuSyncPushDept(dept, month){
 function sbuSyncPushAllLocal(){
   if(!sbuSyncUrl){ showToast("先に同期先URLを保存してください"); return; }
   if(!sbuSyncEnabled){ showToast("先に同期をONにしてください"); return; }
-  if(!confirm("この端末に保存されている全BU・全月の実績・計画データを、スプレッドシートへ送り直します。よろしいですか？")) return;
+  if(!confirm("この端末に保存されている全BU・全月の実績・計画・コメント（作戦目標／振り返り）を、スプレッドシートへ送り直します。よろしいですか？")) return;
   let count=0;
   DEPTS.forEach(dept=>{
     SBU_SYNC_MONTHS.forEach(m=>{
       sbuSyncPushKey(sk(dept,"actuals",m), localStorage.getItem(sk(dept,"actuals",m)) || "{}");
       sbuSyncPushKey(sk(dept,"plans",m),   localStorage.getItem(sk(dept,"plans",m))   || "{}");
       count+=2;
+      /* 週次PDCAコメント（作戦・目標／振り返り・来週対策）も送信し直す。
+         savePDCAが以前は同期処理を呼んでいなかったため、過去に入力された分の復旧用 */
+      getWeeks(m).forEach((_,wi)=>{
+        const ptKey=sk(dept,`plan_txt_${wi}`,m), atKey=sk(dept,`action_txt_${wi}`,m);
+        const pt=localStorage.getItem(ptKey), at=localStorage.getItem(atKey);
+        if(pt!=null){ sbuSyncPushKey(ptKey, pt); count++; }
+        if(at!=null){ sbuSyncPushKey(atKey, at); count++; }
+      });
     });
   });
   showToast(`${count}件の送信を開始しました（完了まで少し時間がかかります）`);
@@ -2293,8 +2301,14 @@ function savePDCA(dept,wi){
   try{
     const pt=document.getElementById(`txt-plan-${dept}-${wi}`)?.value||"";
     const at=document.getElementById(`txt-action-${dept}-${wi}`)?.value||"";
-    localStorage.setItem(sk(dept,`plan_txt_${wi}`),  pt);
-    localStorage.setItem(sk(dept,`action_txt_${wi}`),at);
+    const ptKey=sk(dept,`plan_txt_${wi}`);
+    const atKey=sk(dept,`action_txt_${wi}`);
+    localStorage.setItem(ptKey, pt);
+    localStorage.setItem(atKey, at);
+    /* 以前はローカル保存のみでスプレッドシートへの同期が行われておらず、
+       他の端末に「作戦・目標」「振り返り・来週対策」のコメントが反映されない不具合があった */
+    sbuSyncPushKey(ptKey, pt);
+    sbuSyncPushKey(atKey, at);
     showSaveBadge(true);
   }catch(e){}
 }
@@ -3216,6 +3230,16 @@ const CHANGELOG = [
     author: "Claude",
     content: "「指定範囲の実績を消去」の開始日・終了日を、数値の手入力からプルダウン選択式（1〜31日）に変更。入力ミスを防ぎ、操作しやすく改善（デフォルトは開始日=1日、終了日=31日）。"
   },
+  {
+    date: "2026-07-06",
+    author: "Claude",
+    content: "表示ラベルを「計画の予算比」→「計画予算比」、「計画の昇対比」→「計画昨対比」に統一（表記ゆれ「昇対」を正しい「昨対」に修正）。KPIカード・店舗別カード・ホーム画面・日次テーブル・週次サマリーの各所を一括修正。"
+  },
+  {
+    date: "2026-07-06",
+    author: "Claude",
+    content: "週次PDCA欄（「作戦・目標」「振り返り・来週対策」コメント）が、savePDCA関数でローカル保存のみ行われスプレッドシートへの同期処理が呼ばれておらず、他の端末に入力内容が反映されない不具合を修正。あわせて「ローカルの全データを送り直す」ボタンでも、過去に入力済みのPDCAコメントを送信し直せるよう対応。"
+  },
 ];
 
 function renderChangelog(){
@@ -3277,11 +3301,11 @@ function renderBuSelectGrid(){
           <span class="bu-metric-diff ${dc(lyDiff)}">${fd(lyDiff)}</span>
         </div>
         <div class="bu-metric-row">
-          <span class="bu-metric-label" style="color:#6a1b9a">計画の予算比</span>
+          <span class="bu-metric-label" style="color:#6a1b9a">計画予算比</span>
           <span class="bu-metric-val ${rc(planBudgetRatio)}">${fr(planBudgetRatio)}</span>
         </div>
         <div class="bu-metric-row">
-          <span class="bu-metric-label" style="color:#6a1b9a">計画の昇対比</span>
+          <span class="bu-metric-label" style="color:#6a1b9a">計画昨対比</span>
           <span class="bu-metric-val ${rc(planLyRatio)}">${fr(planLyRatio)}</span>
         </div>
       </div>
@@ -4224,8 +4248,8 @@ function buildDeptHTML(dept){
       <button class="btn-sm wsc-toggle" id="wsc-planRatio-${dept}" onclick="toggleWSCol('${dept}','planRatio')">計画比</button>
       <button class="btn-sm wsc-toggle" id="wsc-lyRatio-${dept}" onclick="toggleWSCol('${dept}','lyRatio')">昨対比</button>
       <div class="vline"></div>
-      <button class="btn-sm wsc-toggle" id="wsc-planBudgetRatio-${dept}" onclick="toggleWSCol('${dept}','planBudgetRatio')">計画の予算比</button>
-      <button class="btn-sm wsc-toggle" id="wsc-planLyRatio-${dept}" onclick="toggleWSCol('${dept}','planLyRatio')">計画の昇対比</button>
+      <button class="btn-sm wsc-toggle" id="wsc-planBudgetRatio-${dept}" onclick="toggleWSCol('${dept}','planBudgetRatio')">計画予算比</button>
+      <button class="btn-sm wsc-toggle" id="wsc-planLyRatio-${dept}" onclick="toggleWSCol('${dept}','planLyRatio')">計画昨対比</button>
     </div>
     <div class="tbl-wrap">
       <table id="week-summary-${dept}"><thead></thead><tbody></tbody></table>
@@ -4275,8 +4299,8 @@ function buildDeptHTML(dept){
     <button class="pill"    id="tog-${dept}-diff"     onclick="togOpt('${dept}','diff')">差異額</button>
     <button class="pill"    id="tog-${dept}-weekly"   onclick="togOpt('${dept}','weekly')">週次のみ</button>
     <div class="vline"></div>
-    <button class="pill"    id="tog-${dept}-planBudgetRatio" onclick="togOpt('${dept}','planBudgetRatio')">計画の予算比</button>
-    <button class="pill"    id="tog-${dept}-planLyRatio"     onclick="togOpt('${dept}','planLyRatio')">計画の昇対比</button>
+    <button class="pill"    id="tog-${dept}-planBudgetRatio" onclick="togOpt('${dept}','planBudgetRatio')">計画予算比</button>
+    <button class="pill"    id="tog-${dept}-planLyRatio"     onclick="togOpt('${dept}','planLyRatio')">計画昨対比</button>
   </div>
   <div id="tbl-weeks-${dept}"></div>`;
 }
@@ -4327,8 +4351,8 @@ const WSC_COLS = [
   {key:"budgetRatio", label:"予算比"},
   {key:"planRatio",   label:"計画比"},
   {key:"lyRatio",     label:"昨対比"},
-  {key:"planBudgetRatio", label:"計画の予算比"},
-  {key:"planLyRatio",     label:"計画の昇対比"},
+  {key:"planBudgetRatio", label:"計画予算比"},
+  {key:"planLyRatio",     label:"計画昨対比"},
 ];
 function wscInit(dept){
   if(!wscState[dept]) wscState[dept]={budget:true,lyRaw:true,plan:true,actual:true,budgetRatio:true,planRatio:true,lyRatio:true,planBudgetRatio:false,planLyRatio:false};
@@ -4452,8 +4476,8 @@ function renderDeptKPI(dept){
     tp+=sumP(dept,s,ad)||0;
   });
   const r=tc&&tb?ta/tb:null,lr=tc&&tl?ta/tl:null;
-  const pbr=tp&&tb?tp/tb:null;   /* 計画の予算比 */
-  const plyr=tp&&tl?tp/tl:null;  /* 計画の昇対比 */
+  const pbr=tp&&tb?tp/tb:null;   /* 計画予算比 */
+  const plyr=tp&&tl?tp/tl:null;  /* 計画昨対比 */
   const el=document.getElementById(`kpi-${dept}`);
   if(!el) return;
   const noUploadBadge=hasUpload?"":`<span style="font-size:10px;background:#fff8e1;color:#e65100;padding:2px 8px;border-radius:10px;border:0.5px solid #ffe082;margin-left:6px">予算未登録</span>`;
@@ -4470,10 +4494,10 @@ function renderDeptKPI(dept){
     <div class="kpi"><div class="kpi-label">昨年比</div>
       <div class="kpi-val ${rc(lr)}">${hasUpload?fr(lr):'—'}</div>
       <div class="kpi-sub">対昨年実績</div></div>
-    <div class="kpi"><div class="kpi-label" style="color:#6a1b9a">計画の予算比</div>
+    <div class="kpi"><div class="kpi-label" style="color:#6a1b9a">計画予算比</div>
       <div class="kpi-val ${rc(pbr)}" style="${pbr==null?'color:#aaa':''}">${tp?fr(pbr):'—'}</div>
       <div class="kpi-sub">計画÷予算</div></div>
-    <div class="kpi"><div class="kpi-label" style="color:#6a1b9a">計画の昇対比</div>
+    <div class="kpi"><div class="kpi-label" style="color:#6a1b9a">計画昨対比</div>
       <div class="kpi-val ${rc(plyr)}" style="${plyr==null?'color:#aaa':''}">${tp?fr(plyr):'—'}</div>
       <div class="kpi-sub">計画÷昨年実績</div></div>`;
   const lbl=document.getElementById(`dept-month-lbl-${dept}`);
@@ -4526,11 +4550,11 @@ function renderDeptStores(dept){
           <span class="bu-metric-diff ${dc(lyDiff)}">${fd(lyDiff)}</span>
         </div>
         <div class="bu-metric-row">
-          <span class="bu-metric-label" style="color:#6a1b9a">計画の予算比</span>
+          <span class="bu-metric-label" style="color:#6a1b9a">計画予算比</span>
           <span class="bu-metric-val ${rc(planBudgetRatio)}" style="${planBudgetRatio==null?'':''}">${fr(planBudgetRatio)}</span>
         </div>
         <div class="bu-metric-row">
-          <span class="bu-metric-label" style="color:#6a1b9a">計画の昇対比</span>
+          <span class="bu-metric-label" style="color:#6a1b9a">計画昨対比</span>
           <span class="bu-metric-val ${rc(planLyRatio)}">${fr(planLyRatio)}</span>
         </div>
       </div>
@@ -4583,8 +4607,8 @@ function renderDeptTable(dept){
     h+=`<th style="min-width:50px">計画比</th>`;
     if(lastyear) h+=`<th>昨対比</th>`;
     if(diff)     h+=`<th>差異</th>`;
-    if(planBudgetRatio) h+=`<th style="min-width:60px;color:#6a1b9a">計画の予算比</th>`;
-    if(planLyRatio)     h+=`<th style="min-width:60px;color:#6a1b9a">計画の昇対比</th>`;
+    if(planBudgetRatio) h+=`<th style="min-width:60px;color:#6a1b9a">計画予算比</th>`;
+    if(planLyRatio)     h+=`<th style="min-width:60px;color:#6a1b9a">計画昨対比</th>`;
     return h;
   };
   thead+=headCellsBlock();
