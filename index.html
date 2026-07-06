@@ -2491,6 +2491,27 @@ function bulkClear(dept){
   sbuSyncPushDept(dept);
   showToast(`計画を${count}件消去しました`);
 }
+/* 指定日範囲（from〜to日）の実績をまとめて削除する。
+   誤って入力・混入した実績を、正しい実績はそのまま残しつつピンポイントで消したい場合に使う */
+function bulkClearActuals(dept){
+  const sv=document.getElementById(`bulk-store-${dept}`).value;
+  const from=parseInt(document.getElementById(`bulk-actual-from-${dept}`).value);
+  const to=parseInt(document.getElementById(`bulk-actual-to-${dept}`).value);
+  if(isNaN(from)||isNaN(to)||from<1||to<from){ showToast("開始日・終了日を正しく入力してください"); return; }
+  const targets=sv==="ALL"?[...stores]:[sv];
+  const storeLabel=sv==="ALL"?"全店舗":sv+"店";
+  if(!confirm(`${storeLabel}の${from}日〜${to}日の実績をすべて削除します。よろしいですか？`)) return;
+  let count=0;
+  targets.forEach(s=>{
+    if(!actuals[dept][s]) return;
+    for(let d=from; d<=to; d++){
+      if(actuals[dept][s][d]!=null){ delete actuals[dept][s][d]; count++; }
+    }
+  });
+  saveAll(); renderDept(dept);
+  sbuSyncPushDept(dept);
+  showToast(`実績を${count}件削除しました`);
+}
 
 /* ============================================================
    CSVエクスポート
@@ -3174,6 +3195,26 @@ const CHANGELOG = [
     date: "2026-07-06",
     author: "Claude",
     content: "「計画の予算比」「計画の昇対比」を、BU個別ページ上部のKPIカード・店舗別カード、およびホーム画面（BU選択カード一覧）にも追加。常時表示。"
+  },
+  {
+    date: "2026-07-06",
+    author: "Claude",
+    content: "BU個別ページ上部のKPIカードが、実績入力日数に関わらず月全体（31日分）の予算・計画・昨年実績で集計されており、店舗別カードやホーム画面（実績入力日数のみで集計）と数字がずれる不具合を修正。実績が入力されている日付だけで集計する進捗ベースの計算に統一した。"
+  },
+  {
+    date: "2026-07-06",
+    author: "Claude",
+    content: "一括入力バーに「指定範囲の実績を消去」機能を追加。店舗・開始日・終了日を指定して、その範囲の実績だけをまとめて削除できる（他の日の実績は残したまま）。誤って混入した実績データを部分的に修正したい場合に使用。"
+  },
+  {
+    date: "2026-07-06",
+    author: "Claude",
+    content: "①「指定範囲の実績を消去」の開始日・終了日入力欄が、placeholderの文字がはみ出て見づらかったのを、ラベル表示に変更して改善。②実績・予算を手入力するたびに日次テーブル全体が作り直され、横スクロール位置が先頭に戻ってしまう不具合を修正（再描画前後でスクロール位置を保存・復元するように変更）。"
+  },
+  {
+    date: "2026-07-06",
+    author: "Claude",
+    content: "「指定範囲の実績を消去」の開始日・終了日を、数値の手入力からプルダウン選択式（1〜31日）に変更。入力ミスを防ぎ、操作しやすく改善（デフォルトは開始日=1日、終了日=31日）。"
   },
 ];
 
@@ -4136,6 +4177,8 @@ function renderDept(dept){
 function buildDeptHTML(dept){
   const storeOpts=[`<option value="ALL">全店舗</option>`,...stores.map(s=>`<option value="${s}">${s}</option>`)].join("");
   const weekOpts=[`<option value="ALL">全週</option>`,...getWeeks().map((w,i)=>`<option value="${i}">${w.label}</option>`)].join("");
+  const dayOptsFrom=Array.from({length:31},(_,i)=>i+1).map(d=>`<option value="${d}"${d===1?' selected':''}>${d}日</option>`).join("");
+  const dayOptsTo=Array.from({length:31},(_,i)=>i+1).map(d=>`<option value="${d}"${d===31?' selected':''}>${d}日</option>`).join("");
   return `
   <div class="flex-row">
     <button class="btn btn-sm" onclick="switchPage('home')">← ホーム</button>
@@ -4209,6 +4252,15 @@ function buildDeptHTML(dept){
     <button class="btn-sm" onclick="bulkFill('${dept}',document.getElementById('bulk-base-${dept}').value)">計画を一括入力</button>
     <div class="vline"></div>
     <button class="btn-sm" style="color:#c62828" onclick="bulkClear('${dept}')">計画を消去</button>
+    <div class="vline"></div>
+    <span style="font-size:11px;color:#888">実績を消去：</span>
+    <span style="font-size:11px;color:#888">開始日</span>
+    <select class="sm" id="bulk-actual-from-${dept}">${dayOptsFrom}</select>
+    <span style="font-size:11px;color:#888">〜</span>
+    <span style="font-size:11px;color:#888">終了日</span>
+    <select class="sm" id="bulk-actual-to-${dept}">${dayOptsTo}</select>
+    <span style="font-size:11px;color:#888">日（店舗は上の「店舗」選択を使用）</span>
+    <button class="btn-sm" style="color:#c62828" onclick="bulkClearActuals('${dept}')">指定範囲の実績を消去</button>
   </div>
 
   <!-- 表示オプション -->
@@ -4387,7 +4439,11 @@ function renderDeptWeekSummary(dept){
 function renderDeptKPI(dept){
   const m=getMonth();
   const hasUpload=!!(uploadedBudget[dept]?.[m]);
-  const ad=allDays();
+  /* 実績が1件でも入力されている日付だけを集計対象にする（進捗ベース。renderDeptStores/renderBuSelectGridと同じロジックに統一） */
+  const allD=allDays();
+  const inputDays = allD.filter(d => stores.some(s => getVal(dept,s,d)!=null));
+  const ad = inputDays.length>0 ? inputDays : allD;
+  const progressLabel = inputDays.length>0 ? `${inputDays.length}日分の進捗` : "月次累積";
   let tb=0,ta=0,tl=0,tc=0,tp=0;
   stores.forEach(s=>{
     tb+=sumB(dept,s,ad);
@@ -4404,10 +4460,10 @@ function renderDeptKPI(dept){
   el.innerHTML=`
     <div class="kpi"><div class="kpi-label">予算（${stores.length}店舗計）${noUploadBadge}</div>
       <div class="kpi-val" style="${!hasUpload?'color:#aaa':''}">${hasUpload?f(tb):'—'}</div>
-      <div class="kpi-sub">月次累積</div></div>
+      <div class="kpi-sub">${progressLabel}</div></div>
     <div class="kpi"><div class="kpi-label">実績</div>
       <div class="kpi-val ${rc(r)}">${f(tc?ta:null)}</div>
-      <div class="kpi-sub">月次累積</div></div>
+      <div class="kpi-sub">${progressLabel}</div></div>
     <div class="kpi"><div class="kpi-label">計画比</div>
       <div class="kpi-val ${rc(r)}">${hasUpload?fr(r):'—'}</div>
       <div class="kpi-sub">${r!=null&&hasUpload?`<span class="badge badge-${rc(r)}">${r>=1?"達成":"未達"}</span>`:""}</div></div>
@@ -4538,6 +4594,14 @@ function renderDeptTable(dept){
   /* 週ごとにテーブル＋PDCA欄を生成 */
   const outer=document.getElementById(`tbl-weeks-${dept}`);
   if(!outer) return;
+  /* 実績・予算セルに入力するたびにテーブル全体を作り直すため、
+     何もしないと横スクロール位置が毎回先頭に戻ってしまう。
+     再描画前に各週テーブルの横スクロール位置を記録しておき、後で復元する */
+  const savedScroll={};
+  outer.querySelectorAll('table[id^="tbl-wi-"]').forEach(t=>{
+    const wrap=t.closest('.tbl-wrap');
+    if(wrap) savedScroll[t.id]=wrap.scrollLeft;
+  });
   let html="";
 
   wis.forEach(wi=>{
@@ -4680,6 +4744,12 @@ function renderDeptTable(dept){
 
   outer.innerHTML=html;
   /* PDCA復元はrenderDeptWeekPDCAで行うため不要 */
+  /* 保存しておいた横スクロール位置を、再生成された同じ週テーブルに復元する */
+  Object.entries(savedScroll).forEach(([tid,sl])=>{
+    const t=document.getElementById(tid);
+    const wrap=t?.closest('.tbl-wrap');
+    if(wrap) wrap.scrollLeft=sl;
+  });
 }
 
 /* ============================================================
