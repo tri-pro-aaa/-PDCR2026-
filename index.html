@@ -3170,6 +3170,11 @@ const CHANGELOG = [
     author: "Claude",
     content: "「計画」が予算・昨年実績に対してどれくらいの比率かを確認できる「計画の予算比」「計画の昇対比」列を追加（日次テーブル・週次/月次サマリーテーブル両方）。表示切り替えボタンで必要なときだけオン/オフできる（デフォルトはOFF）。"
   },
+  {
+    date: "2026-07-06",
+    author: "Claude",
+    content: "「計画の予算比」「計画の昇対比」を、BU個別ページ上部のKPIカード・店舗別カード、およびホーム画面（BU選択カード一覧）にも追加。常時表示。"
+  },
 ];
 
 function renderChangelog(){
@@ -3209,6 +3214,9 @@ function renderBuSelectGrid(){
     const lyRatio   = a!=null && ly ? a/ly : null;
     const lyDiff    = a!=null ? a-ly : null;
 
+    const planBudgetRatio = p!=null && b ? p/b : null;
+    const planLyRatio     = p!=null && ly ? p/ly : null;
+
     return `<div class="bu-card" onclick="switchPage('dept-${dept}')">
       <div class="bu-card-name">${dept}</div>
       <div class="bu-card-metrics">
@@ -3226,6 +3234,14 @@ function renderBuSelectGrid(){
           <span class="bu-metric-label">昨対比</span>
           <span class="bu-metric-val ${rc(lyRatio)}">${fr(lyRatio)}</span>
           <span class="bu-metric-diff ${dc(lyDiff)}">${fd(lyDiff)}</span>
+        </div>
+        <div class="bu-metric-row">
+          <span class="bu-metric-label" style="color:#6a1b9a">計画の予算比</span>
+          <span class="bu-metric-val ${rc(planBudgetRatio)}">${fr(planBudgetRatio)}</span>
+        </div>
+        <div class="bu-metric-row">
+          <span class="bu-metric-label" style="color:#6a1b9a">計画の昇対比</span>
+          <span class="bu-metric-val ${rc(planLyRatio)}">${fr(planLyRatio)}</span>
         </div>
       </div>
       <div class="bu-card-period">${inputDays.length>0?`${inputDays.length}日分の進捗`:"未入力"}</div>
@@ -4372,13 +4388,16 @@ function renderDeptKPI(dept){
   const m=getMonth();
   const hasUpload=!!(uploadedBudget[dept]?.[m]);
   const ad=allDays();
-  let tb=0,ta=0,tl=0,tc=0;
+  let tb=0,ta=0,tl=0,tc=0,tp=0;
   stores.forEach(s=>{
     tb+=sumB(dept,s,ad);
     const a=sumA(dept,s,ad);if(a!=null){ta+=a;tc++;}
     tl+=sumL(dept,s,ad);
+    tp+=sumP(dept,s,ad)||0;
   });
   const r=tc&&tb?ta/tb:null,lr=tc&&tl?ta/tl:null;
+  const pbr=tp&&tb?tp/tb:null;   /* 計画の予算比 */
+  const plyr=tp&&tl?tp/tl:null;  /* 計画の昇対比 */
   const el=document.getElementById(`kpi-${dept}`);
   if(!el) return;
   const noUploadBadge=hasUpload?"":`<span style="font-size:10px;background:#fff8e1;color:#e65100;padding:2px 8px;border-radius:10px;border:0.5px solid #ffe082;margin-left:6px">予算未登録</span>`;
@@ -4394,7 +4413,13 @@ function renderDeptKPI(dept){
       <div class="kpi-sub">${r!=null&&hasUpload?`<span class="badge badge-${rc(r)}">${r>=1?"達成":"未達"}</span>`:""}</div></div>
     <div class="kpi"><div class="kpi-label">昨年比</div>
       <div class="kpi-val ${rc(lr)}">${hasUpload?fr(lr):'—'}</div>
-      <div class="kpi-sub">対昨年実績</div></div>`;
+      <div class="kpi-sub">対昨年実績</div></div>
+    <div class="kpi"><div class="kpi-label" style="color:#6a1b9a">計画の予算比</div>
+      <div class="kpi-val ${rc(pbr)}" style="${pbr==null?'color:#aaa':''}">${tp?fr(pbr):'—'}</div>
+      <div class="kpi-sub">計画÷予算</div></div>
+    <div class="kpi"><div class="kpi-label" style="color:#6a1b9a">計画の昇対比</div>
+      <div class="kpi-val ${rc(plyr)}" style="${plyr==null?'color:#aaa':''}">${tp?fr(plyr):'—'}</div>
+      <div class="kpi-sub">計画÷昨年実績</div></div>`;
   const lbl=document.getElementById(`dept-month-lbl-${dept}`);
   if(lbl) lbl.textContent=`2026年${m}月`;
 }
@@ -4423,6 +4448,9 @@ function renderDeptStores(dept){
     const lyRatio = a!=null && ly ? a/ly : null;
     const lyDiff  = a!=null ? a-ly : null;
 
+    const planBudgetRatio = p!=null && b ? p/b : null;
+    const planLyRatio     = p!=null && ly ? p/ly : null;
+
     return `<div class="store-card">
       <div class="store-name">${s}店</div>
       <div class="bu-card-metrics">
@@ -4440,6 +4468,14 @@ function renderDeptStores(dept){
           <span class="bu-metric-label">昨対比</span>
           <span class="bu-metric-val ${rc(lyRatio)}">${fr(lyRatio)}</span>
           <span class="bu-metric-diff ${dc(lyDiff)}">${fd(lyDiff)}</span>
+        </div>
+        <div class="bu-metric-row">
+          <span class="bu-metric-label" style="color:#6a1b9a">計画の予算比</span>
+          <span class="bu-metric-val ${rc(planBudgetRatio)}" style="${planBudgetRatio==null?'':''}">${fr(planBudgetRatio)}</span>
+        </div>
+        <div class="bu-metric-row">
+          <span class="bu-metric-label" style="color:#6a1b9a">計画の昇対比</span>
+          <span class="bu-metric-val ${rc(planLyRatio)}">${fr(planLyRatio)}</span>
         </div>
       </div>
     </div>`;
