@@ -265,6 +265,13 @@ input.pi:focus{outline:none;border-color:#9c27b0;background:#fff}
 .event-color-row{display:flex;gap:6px;margin-top:4px;flex-wrap:wrap}
 .event-color-swatch{width:22px;height:22px;border-radius:50%;cursor:pointer;border:2px solid transparent}
 .event-color-swatch.sel{border-color:#333}
+.event-cat-row{display:flex;gap:6px;margin-top:4px;flex-wrap:wrap}
+.event-cat-chip{display:flex;align-items:center;gap:4px;padding:4px 9px;border-radius:14px;font-size:11px;cursor:pointer;border:1.5px solid transparent;color:#333;background:#f2f2f2}
+.event-cat-chip .dot{width:9px;height:9px;border-radius:50%;flex-shrink:0}
+.event-cat-chip.sel{border-color:#333;background:#fff;font-weight:600}
+.event-date-range{display:flex;gap:8px;align-items:center}
+.event-date-range select{width:auto;flex:1}
+.event-date-range span{color:#888;font-size:11px}
 .event-modal-actions{display:flex;gap:8px;margin-top:14px}
 .event-modal-actions button{flex:1;padding:8px;border-radius:6px;border:0.5px solid #c0c0be;background:#fff;cursor:pointer;font-size:12px}
 .event-modal-actions button.primary{background:#378add;color:#fff;border-color:#378add}
@@ -2070,6 +2077,8 @@ function saveAll(m){
       localStorage.setItem(sk(d,"plans",month),  JSON.stringify(plans[d]||{}));
       localStorage.setItem(sk(d,"events",month), JSON.stringify(events[d]||[]));
     });
+    /* 全BU共通イベント（どのBUページにも表示される） */
+    localStorage.setItem(sk("ALL","events",month), JSON.stringify(events["ALL"]||[]));
     showSaveBadge(true);
   }catch(e){showSaveBadge(false);}
 }
@@ -2248,6 +2257,12 @@ function sbuSyncPushDept(dept, month){
   sbuSyncPushKey(sk(dept,"plans",m),   localStorage.getItem(sk(dept,"plans",m))   || "{}");
   sbuSyncPushKey(sk(dept,"events",m),  localStorage.getItem(sk(dept,"events",m))  || "[]");
 }
+/* イベントのみを指定バケット（BU名 or "ALL"＝全BU共通）単位で送信する */
+function sbuSyncPushEventsBucket(bucketKey, month){
+  if(!sbuSyncEnabled || !sbuSyncUrl) return;
+  const m = month ?? getMonth();
+  sbuSyncPushKey(sk(bucketKey,"events",m), localStorage.getItem(sk(bucketKey,"events",m)) || "[]");
+}
 /* ローカルに保存されている全BU×全対象月の実績・計画データを、
    スプレッドシートへまとめて送信し直す（過去の同期不具合の復旧用） */
 function sbuSyncPushAllLocal(){
@@ -2374,6 +2389,10 @@ function loadAll(){
       });
     }catch(e){actuals[dept]={};plans[dept]={};events[dept]=[];}
   });
+  try{
+    const evAll=localStorage.getItem(sk("ALL","events"));
+    events["ALL"]=evAll?JSON.parse(evAll):[];
+  }catch(e){events["ALL"]=[];}
 }
 function showSaveBadge(ok){
   const b=document.getElementById("save-badge");
@@ -2495,28 +2514,46 @@ function up2(dept,s,d,v){
 /* ============================================================
    イベントナレッジ（運動会・祭り・競合オープン/閉店など）
 ============================================================ */
-const EVENT_COLORS = ["#e53935","#fb8c00","#fdd835","#43a047","#1e88e5","#8e24aa","#757575"];
+const EVENT_CATEGORIES = [
+  {name:"チラシ",     color:"#e53935"},
+  {name:"イベント",   color:"#fb8c00"},
+  {name:"新店改装",   color:"#8e24aa"},
+  {name:"競合店出店", color:"#fdd835"},
+  {name:"競合店閉店", color:"#757575"},
+  {name:"天候",       color:"#1e88e5"},
+  {name:"その他",     color:"#43a047"},
+];
 let eventModalCtx = null; /* {dept, day} */
-let eventEditColor = EVENT_COLORS[0];
+let eventEditCategory = EVENT_CATEGORIES[0].name;
+let eventEditColor = EVENT_CATEGORIES[0].color;
+let eventEditingGroupId = null; /* nullなら新規追加、値があれば編集中 */
+let eventEditingGroupBucket = null; /* 編集中グループの保存先（BU名 or "ALL"） */
 
 function genEventId(){ return "ev_" + Date.now() + "_" + Math.random().toString(36).slice(2,8); }
+function genGroupId(){ return "grp_" + Date.now() + "_" + Math.random().toString(36).slice(2,8); }
 
-/* その日のイベント一覧（全店 + 指定店舗ぶん全て）を返す */
+/* その日のイベント一覧（そのBU固有 + 全BU共通）を返す。各要素に由来(_bucket)を付与する */
 function eventsForDay(dept, d){
-  return (events[dept]||[]).filter(e=>e.day===d);
+  const common = (events["ALL"]||[]).filter(e=>e.day===d).map(e=>({...e, _bucket:"ALL"}));
+  const own    = (events[dept]||[]).filter(e=>e.day===d).map(e=>({...e, _bucket:dept}));
+  return [...common, ...own];
 }
 /* 日次テーブルのイベントセルに表示するバッジHTML */
 function eventCellHtml(dept, d){
   const list = eventsForDay(dept, d);
   if(list.length===0) return `<span class="event-add-hint">＋</span>`;
   return list.map(e=>{
-    const label = e.scope==="全店" ? e.text : `[${e.scope}] ${e.text}`;
+    const catPart = e.category ? `${e.category}：` : "";
+    const commonPart = e._bucket==="ALL" ? "🌐" : "";
+    const label = commonPart + (e.scope==="全店" ? "" : `[${e.scope}] `) + catPart + e.text;
     return `<span class="event-badge" style="background:${e.color}" title="${label.replace(/"/g,'&quot;')}">${label}</span>`;
   }).join("");
 }
 function openEventModal(dept, d){
   eventModalCtx = {dept, day: d};
-  eventEditColor = EVENT_COLORS[0];
+  eventEditCategory = EVENT_CATEGORIES[0].name;
+  eventEditColor = EVENT_CATEGORIES[0].color;
+  eventEditingGroupId = null;
   renderEventModal();
 }
 function closeEventModal(){
@@ -2528,6 +2565,7 @@ function renderEventModal(){
   if(!eventModalCtx) return;
   const {dept, day} = eventModalCtx;
   const m = getMonth();
+  const days = daysInMonth(2026, m);
   let el = document.getElementById("event-modal-overlay");
   if(!el){
     el = document.createElement("div");
@@ -2536,58 +2574,135 @@ function renderEventModal(){
     el.onclick = (ev)=>{ if(ev.target===el) closeEventModal(); };
     document.body.appendChild(el);
   }
+  /* 入力途中の値を保持（既にモーダルが開いていれば維持） */
+  const prevStart  = document.getElementById("event-start-input")?.value;
+  const prevEnd    = document.getElementById("event-end-input")?.value;
+  const prevScope  = document.getElementById("event-scope-input")?.value;
+  const prevText   = document.getElementById("event-text-input")?.value;
+  const prevCommon = document.getElementById("event-common-input")?.checked;
+  const startDay  = prevStart ? +prevStart : day;
+  const endDay    = prevEnd   ? +prevEnd   : day;
+  const scopeVal  = prevScope != null ? prevScope : "全店";
+  const textVal   = prevText  != null ? prevText  : "";
+  const commonVal = prevCommon != null ? prevCommon : false;
+
   const list = eventsForDay(dept, day);
-  const scopeOptions = ["全店", ...stores].map(s=>`<option value="${s}">${s}</option>`).join("");
+  const scopeOptions = ["全店", ...stores].map(s=>`<option value="${s}" ${s===scopeVal?'selected':''}>${s}</option>`).join("");
+  const dayOptions = (sel)=>Array.from({length:days},(_,i)=>i+1).map(dd=>`<option value="${dd}" ${dd===sel?'selected':''}>${m}/${dd}</option>`).join("");
   const listHtml = list.length===0
     ? `<p style="color:#aaa;font-size:12px;margin:8px 0">まだイベントは登録されていません</p>`
     : list.map(e=>`
       <div class="event-modal-item">
         <span class="dot" style="background:${e.color}"></span>
-        <span class="txt">${e.text}<div class="scope">${e.scope}</div></span>
-        <button onclick="deleteEvent('${dept}','${e.id}')">削除</button>
+        <span class="txt">${e._bucket==="ALL"?"🌐全BU共通　":""}${e.category?`<b>${e.category}</b>：`:""}${e.text}<div class="scope">${e.scope}</div></span>
+        <button onclick="editEventGroup('${e._bucket}','${e.groupId||e.id}')">編集</button>
+        <button onclick="deleteEvent('${e._bucket}','${e.id}')">削除</button>
       </div>`).join("");
-  const swatches = EVENT_COLORS.map(c=>`<span class="event-color-swatch${c===eventEditColor?' sel':''}" style="background:${c}" onclick="selectEventColor('${c}')"></span>`).join("");
+  const catChips = EVENT_CATEGORIES.map(c=>`
+    <span class="event-cat-chip${c.name===eventEditCategory?' sel':''}" onclick="selectEventCategory('${c.name}','${c.color}')">
+      <span class="dot" style="background:${c.color}"></span>${c.name}
+    </span>`).join("");
+  const editingBanner = eventEditingGroupId
+    ? `<p style="background:#fff8e1;color:#e65100;font-size:11px;padding:6px 8px;border-radius:5px;margin:0 0 8px">編集中：内容を直して「更新」を押してください　<a href="#" onclick="cancelEventEdit();return false" style="color:#e65100;text-decoration:underline">編集をやめる</a></p>`
+    : "";
   el.innerHTML = `
     <div class="event-modal">
       <h3>${dept}　${m}月${day}日のイベント</h3>
       <div class="event-modal-list">${listHtml}</div>
-      <label>対象</label>
+      ${editingBanner}
+      <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+        <input type="checkbox" id="event-common-input" ${commonVal?'checked':''} style="width:auto">
+        🌐 全BU共通にする（チェックすると全BUの日次テーブルに表示されます）
+      </label>
+      <label>対象店舗</label>
       <select id="event-scope-input">${scopeOptions}</select>
+      <label>カテゴリ（色分け）</label>
+      <div class="event-cat-row">${catChips}</div>
       <label>内容（自由記述）</label>
-      <input type="text" id="event-text-input" placeholder="例：夏祭り、競合A店オープン など" maxlength="60">
-      <label>色</label>
-      <div class="event-color-row">${swatches}</div>
+      <input type="text" id="event-text-input" placeholder="例：夏ドカン、A店オープン など" maxlength="60" value="${textVal.replace(/"/g,'&quot;')}">
+      <label>期間（連続する日にまとめて登録できます）</label>
+      <div class="event-date-range">
+        <select id="event-start-input">${dayOptions(startDay)}</select>
+        <span>〜</span>
+        <select id="event-end-input">${dayOptions(endDay)}</select>
+      </div>
       <div class="event-modal-actions">
         <button onclick="closeEventModal()">閉じる</button>
-        <button class="primary" onclick="addEvent()">追加</button>
+        <button class="primary" onclick="addEvent()">${eventEditingGroupId?'更新':'追加'}</button>
       </div>
     </div>`;
 }
-function selectEventColor(c){
-  eventEditColor = c;
+function selectEventCategory(name, color){
+  eventEditCategory = name;
+  eventEditColor = color;
+  renderEventModal();
+}
+/* 一覧の「編集」ボタン：そのグループ（期間）の内容をフォームに読み込む。bucketKeyはBU名 or "ALL" */
+function editEventGroup(bucketKey, groupId){
+  const group = (events[bucketKey]||[]).filter(e=>(e.groupId||e.id)===groupId);
+  if(group.length===0) return;
+  const sample = group[0];
+  const daysInGroup = group.map(e=>e.day);
+  eventEditingGroupId = groupId;
+  eventEditingGroupBucket = bucketKey;
+  eventEditCategory = sample.category || EVENT_CATEGORIES[0].name;
+  eventEditColor = sample.color || EVENT_CATEGORIES[0].color;
+  renderEventModal();
+  /* select/inputへ値を反映（renderEventModal内のprev*値保持ロジックより後に上書き） */
+  document.getElementById("event-scope-input").value = sample.scope;
+  document.getElementById("event-text-input").value = sample.text;
+  document.getElementById("event-common-input").checked = (bucketKey==="ALL");
+  document.getElementById("event-start-input").value = Math.min(...daysInGroup);
+  document.getElementById("event-end-input").value = Math.max(...daysInGroup);
+}
+function cancelEventEdit(){
+  eventEditingGroupId = null;
+  eventEditingGroupBucket = null;
   renderEventModal();
 }
 function addEvent(){
   if(!eventModalCtx) return;
-  const {dept, day} = eventModalCtx;
+  const {dept} = eventModalCtx;
+  const isCommon = document.getElementById("event-common-input").checked;
+  const bucketKey = isCommon ? "ALL" : dept;
   const scope = document.getElementById("event-scope-input").value;
   const text = document.getElementById("event-text-input").value.trim();
+  let startDay = +document.getElementById("event-start-input").value;
+  let endDay   = +document.getElementById("event-end-input").value;
   if(!text){ showToast("内容を入力してください"); return; }
-  if(!events[dept]) events[dept]=[];
-  events[dept].push({id:genEventId(), day, scope, text, color:eventEditColor});
+  if(startDay > endDay){ [startDay,endDay] = [endDay,startDay]; }
+  const isEditing = !!eventEditingGroupId;
+  if(isEditing){
+    /* 編集前に「全BU共通」を切り替えている場合、元のバケットから削除する */
+    const oldBucket = eventEditingGroupBucket || bucketKey;
+    if(events[oldBucket]){
+      events[oldBucket] = events[oldBucket].filter(e=>(e.groupId||e.id)!==eventEditingGroupId);
+    }
+  }
+  if(!events[bucketKey]) events[bucketKey]=[];
+  const groupId = isEditing ? eventEditingGroupId : genGroupId();
+  for(let d=startDay; d<=endDay; d++){
+    events[bucketKey].push({id:genEventId(), groupId, day:d, scope, text, color:eventEditColor, category:eventEditCategory});
+  }
   saveAll();
-  sbuSyncPushDept(dept);
-  renderEventModal();
+  sbuSyncPushEventsBucket(bucketKey);
+  if(isEditing && eventEditingGroupBucket && eventEditingGroupBucket!==bucketKey){
+    sbuSyncPushEventsBucket(eventEditingGroupBucket); /* 移動元バケットの削除も同期 */
+  }
+  const daysCount = endDay-startDay+1;
+  showToast(isEditing ? "イベントを更新しました" : (daysCount>1 ? `${daysCount}日分のイベントを登録しました` : "イベントを登録しました"));
+  eventEditingGroupId = null;
+  eventEditingGroupBucket = null;
+  closeEventModal();
   updateCalcCells(dept);
-  showToast("イベントを登録しました");
 }
-function deleteEvent(dept, id){
-  if(!events[dept]) return;
-  events[dept] = events[dept].filter(e=>e.id!==id);
+function deleteEvent(bucketKey, id){
+  if(!events[bucketKey]) return;
+  events[bucketKey] = events[bucketKey].filter(e=>e.id!==id);
   saveAll();
-  sbuSyncPushDept(dept);
+  sbuSyncPushEventsBucket(bucketKey);
   renderEventModal();
-  updateCalcCells(dept);
+  if(eventModalCtx) updateCalcCells(eventModalCtx.dept);
 }
 
 function updateCalcCells(dept){
