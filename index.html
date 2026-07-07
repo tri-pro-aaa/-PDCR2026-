@@ -836,25 +836,6 @@ input.pi:focus{outline:none;border-color:#9c27b0;background:#fff}
       </div>
     </div>
 
-    <!-- 日割予算 自動取得 -->
-    <div class="card" style="grid-column:1/-1">
-      <div class="card-body">
-        <div class="card-title">🔗 日割予算　自動取得（Googleスプレッドシート）</div>
-        <p style="font-size:11px;color:#888;margin-bottom:10px">
-          日割予算を入力しているGoogleスプレッドシートのURLを設定すると、以後はアップロード操作なしで自動的に反映されます（読み取り専用・一方向の取得のみなので、送信エラーは起きません）。<br>
-          事前にそのスプレッドシートを「リンクを知っている全員が閲覧可」に共有設定してください。シート名は「アップロード用」のままにしてください。
-        </p>
-        <div class="flex-row" style="gap:8px;margin-bottom:8px">
-          <input type="text" id="bsync-url" placeholder="https://docs.google.com/spreadsheets/d/xxxx/edit" style="flex:1;min-width:280px;font-size:12px;padding:6px 8px;border:0.5px solid #c0c0be;border-radius:5px">
-          <button class="btn-sm" onclick="budgetSyncSaveSettings()">保存</button>
-        </div>
-        <div class="flex-row" style="gap:8px;align-items:center">
-          <button class="btn-sm" id="bsync-toggle" onclick="budgetSyncToggle()">自動取得：OFF</button>
-          <button class="btn-sm" onclick="budgetSyncFetchNow(true)">🔄 今すぐ取得</button>
-          <span id="bsync-status" style="font-size:11px;color:#888">未設定</span>
-        </div>
-      </div>
-    </div>
 
     <!-- 計画・実績 自動取得（検証中） -->
     <div class="card" style="grid-column:1/-1">
@@ -2737,142 +2718,6 @@ function parseActualCSV(text, fname){
   return true;
 }
 
-/* ============================================================
-   日割予算 自動取得（Googleスプレッドシート・読み取り専用）
-   ※GETのみで完結する方式。POST送信を伴わないため、
-     以前のGAS同期のような「送信したのに届かない」問題は起きない。
-============================================================ */
-let bsyncSheetId = localStorage.getItem("bsync2_sheet_id") || "";
-let bsyncEnabled = localStorage.getItem("bsync2_enabled") === "1";
-let bsyncTimer = null;
-let bsyncFetching = false;
-const BSYNC_SHEET_NAME = "アップロード用";
-const BSYNC_INTERVAL_MS = 5 * 60 * 1000; /* 5分おきに自動取得 */
-
-function bsyncSetStatus(msg){
-  const el = document.getElementById("bsync-status");
-  if(el) el.textContent = msg;
-}
-function bsyncExtractId(input){
-  const s = (input||"").trim();
-  const m = s.match(/\/d\/([a-zA-Z0-9-_]+)/);
-  if(m) return m[1];
-  return s; /* URLでなくIDそのものが貼られた場合 */
-}
-function budgetSyncSaveSettings(){
-  const input = document.getElementById("bsync-url");
-  const id = bsyncExtractId(input?.value || "");
-  bsyncSheetId = id;
-  localStorage.setItem("bsync2_sheet_id", bsyncSheetId);
-  bsyncSetStatus(bsyncSheetId ? "スプレッドシートIDを保存しました" : "未設定");
-  showToast("日割予算の自動取得先を保存しました");
-}
-function budgetSyncToggle(){
-  if(!bsyncSheetId){
-    showToast("先にスプレッドシートのURLを保存してください");
-    return;
-  }
-  bsyncEnabled = !bsyncEnabled;
-  localStorage.setItem("bsync2_enabled", bsyncEnabled ? "1" : "0");
-  budgetSyncUpdateToggleBtn();
-  if(bsyncEnabled){ budgetSyncStart(); } else { budgetSyncStop(); }
-}
-function budgetSyncUpdateToggleBtn(){
-  const btn = document.getElementById("bsync-toggle");
-  if(!btn) return;
-  btn.textContent = "自動取得：" + (bsyncEnabled ? "ON" : "OFF");
-  btn.className = "btn-sm" + (bsyncEnabled ? " btn-blue" : "");
-}
-function budgetSyncStart(){
-  budgetSyncStop();
-  budgetSyncFetchNow(false);
-  bsyncTimer = setInterval(()=>budgetSyncFetchNow(false), BSYNC_INTERVAL_MS);
-}
-function budgetSyncStop(){
-  if(bsyncTimer){ clearInterval(bsyncTimer); bsyncTimer=null; }
-}
-/* gvizのテーブル1行を配列（parseRowsAuto互換の行データ）に変換 */
-function bsyncRowToArray(row, numCols){
-  const arr = new Array(numCols).fill("");
-  if(row && row.c){
-    row.c.forEach((cell,i)=>{
-      if(!cell) return;
-      arr[i] = (cell.v!=null) ? cell.v : "";
-    });
-  }
-  return arr;
-}
-function budgetSyncFetchNow(manual){
-  if(!bsyncSheetId){
-    if(manual) showToast("先にスプレッドシートのURLを保存してください");
-    return;
-  }
-  if(bsyncFetching) return;
-  bsyncFetching = true;
-  if(manual) bsyncSetStatus("取得中…");
-
-  const cbName = "bsyncCb_" + Date.now();
-  let finished = false;
-  const cleanup = (scriptEl)=>{
-    delete window[cbName];
-    if(scriptEl && scriptEl.parentNode) scriptEl.parentNode.removeChild(scriptEl);
-  };
-  const timeoutId = setTimeout(()=>{
-    if(finished) return;
-    finished = true;
-    bsyncFetching = false;
-    bsyncSetStatus("⚠ 取得に失敗しました（共有設定・シート名を確認してください）");
-    cleanup(scriptEl);
-  }, 15000);
-
-  window[cbName] = function(res){
-    if(finished) return;
-    finished = true;
-    clearTimeout(timeoutId);
-    bsyncFetching = false;
-    cleanup(scriptEl);
-    try{
-      const table = res.table;
-      const numCols = table.cols.length;
-      const rows = table.rows.map(r=>bsyncRowToArray(r, numCols));
-      const result = parseRowsAuto(rows, "自動取得", null, true);
-      if(result){
-        bsyncSetStatus(`最終取得：${new Date().toLocaleTimeString()}（${result.days}日分）`);
-        updateUISelects(); onMonthChange();
-        if(manual) showToast(`日割予算を自動取得しました（${result.days}日分）`);
-      } else {
-        bsyncSetStatus("⚠ データを解析できませんでした（シート形式を確認してください）");
-      }
-    }catch(e){
-      bsyncSetStatus("⚠ 取得データの解析に失敗しました");
-    }
-  };
-
-  const scriptEl = document.createElement("script");
-  const sheetParam = encodeURIComponent(BSYNC_SHEET_NAME);
-  scriptEl.src = `https://docs.google.com/spreadsheets/d/${bsyncSheetId}/gviz/tq?sheet=${sheetParam}&headers=0&tqx=out:json;responseHandler:${cbName}`;
-  scriptEl.onerror = ()=>{
-    if(finished) return;
-    finished = true;
-    clearTimeout(timeoutId);
-    bsyncFetching = false;
-    bsyncSetStatus("⚠ 取得に失敗しました（共有設定・シート名を確認してください）");
-    cleanup(scriptEl);
-  };
-  document.head.appendChild(scriptEl);
-}
-function budgetSyncInit(){
-  const input = document.getElementById("bsync-url");
-  if(input && bsyncSheetId) input.value = `https://docs.google.com/spreadsheets/d/${bsyncSheetId}/edit`;
-  budgetSyncUpdateToggleBtn();
-  if(bsyncSheetId && bsyncEnabled){
-    bsyncSetStatus("接続中…");
-    budgetSyncStart();
-  } else if(bsyncSheetId){
-    bsyncSetStatus("自動取得はOFFです");
-  }
-}
-
 function parseRowsAuto(rows, fname, storeHint, silent){
   let hi=-1, dateColIdx=-1, itemColIdx=-1;
   for(let i=0;i<Math.min(rows.length,10);i++){
@@ -3451,23 +3296,28 @@ function renderBuSelectGrid(){
   if(!el) return;
   const allD=allDays();
   el.innerHTML=DEPTS.map(dept=>{
-    /* 実績が1件でも入力されている日付だけを集計対象にする（進捗ベースの比較のため） */
-    const inputDays = allD.filter(d => stores.some(s => getVal(dept,s,d)!=null));
-    const ad = inputDays.length>0 ? inputDays : allD;
+    /* 表示額（予算・計画・昨年実績）は月全体、比率の分母は進捗ベース */
+    const ad = allD;
 
     const a=deptSumA(dept,ad);
     const p=deptSumP(dept,ad);
     const b=deptSumB(dept,ad);
     const ly=deptSumL(dept,ad);
 
-    const budgetRatio = a!=null && b ? a/b : null;
+    /* 予算比・計画比・昨対比は「実績入力済みの日数分」の予算・計画・昨年実績と比較する（進捗ベース） */
+    const pds = allD.filter(d => stores.some(s => getVal(dept,s,d)!=null));
+    const pb = deptSumB(dept,pds);
+    const pp = deptSumP(dept,pds);
+    const ply = deptSumL(dept,pds);
+
+    const budgetRatio = a!=null && pb ? a/pb : null;
     const budgetDiff   = a!=null ? a-b : null;
 
-    const planBase = p!=null ? p : b; /* 計画未入力なら日割予算を基準にする */
+    const planBase = pp>0 ? pp : pb; /* 計画未入力なら日割予算を基準にする */
     const planRatio = a!=null && planBase ? a/planBase : null;
-    const planDiff  = a!=null ? a-planBase : null;
+    const planDiff  = a!=null ? a-(p!=null?p:b) : null;
 
-    const lyRatio   = a!=null && ly ? a/ly : null;
+    const lyRatio   = a!=null && ply ? a/ply : null;
     const lyDiff    = a!=null ? a-ly : null;
 
     const planBudgetRatio = p!=null && b ? p/b : null;
@@ -3500,7 +3350,7 @@ function renderBuSelectGrid(){
           <span class="bu-metric-val ${rc(planLyRatio)}">${fr(planLyRatio)}</span>
         </div>
       </div>
-      <div class="bu-card-period">${inputDays.length>0?`${inputDays.length}日分の進捗`:"未入力"}</div>
+      <div class="bu-card-period">${pds.length>0?`${pds.length}日分入力済み`:"未入力"}</div>
     </div>`;
   }).join("");
 }
@@ -4576,9 +4426,14 @@ function renderDeptWeekSummary(dept){
   /* 店舗ごとの計算結果を{budget,plan,actual,planRatio,lyRatio}にまとめて返す */
   function calcRow(s,ds){
     const b=sumB(dept,s,ds), p=sumP(dept,s,ds), a=sumA(dept,s,ds);
-    const r=ratioW(dept,s,ds);
-    const br=a!=null&&b?a/b:null;
-    const ly=sumL(dept,s,ds), lyr=a!=null&&ly?a/ly:null;
+    const ly=sumL(dept,s,ds);
+    /* 予算比・計画比・昨対比は「実績入力済みの日数分」の予算・計画・昨年実績と比較する（進捗ベース） */
+    const pds = ds.filter(d=>getVal(dept,s,d)!=null);
+    const pb=sumB(dept,s,pds), pp=sumP(dept,s,pds), ply=sumL(dept,s,pds);
+    const planBase = pp>0 ? pp : pb;
+    const r=a!=null&&planBase?a/planBase:null;
+    const br=a!=null&&pb?a/pb:null;
+    const lyr=a!=null&&ply?a/ply:null;
     const pbr=p!=null&&b?p/b:null;
     const plyr=p!=null&&ly?p/ly:null;
     return {budget:b, lyRaw:ly, plan:p, actual:a, budgetRatio:br, planRatio:r, lyRatio:lyr, planBudgetRatio:pbr, planLyRatio:plyr};
@@ -4591,9 +4446,17 @@ function renderDeptWeekSummary(dept){
       const a=sumA(dept,s,ds); if(a!=null){ta+=a;hasTa=true;}
       tl+=sumL(dept,s,ds)||0;
     });
-    const r=hasTa&&tp?ta/tp:null;
-    const br=hasTa&&tb?ta/tb:null;
-    const lyr=hasTa&&tl?ta/tl:null;
+    /* 予算比・計画比・昨対比は「実績入力済みの日数分」の予算・計画・昨年実績と比較する（進捗ベース） */
+    const pds = ds.filter(d=>stores.some(s=>getVal(dept,s,d)!=null));
+    let pb=0,pp=0,pl=0;
+    stores.forEach(s=>{
+      pb+=sumB(dept,s,pds)||0;
+      pp+=sumP(dept,s,pds)||0;
+      pl+=sumL(dept,s,pds)||0;
+    });
+    const r=hasTa&&pp?ta/pp:null;
+    const br=hasTa&&pb?ta/pb:null;
+    const lyr=hasTa&&pl?ta/pl:null;
     const pbr=tp&&tb?tp/tb:null;
     const plyr=tp&&tl?tp/tl:null;
     return {budget:tb, lyRaw:tl, plan:tp, actual:hasTa?ta:null, budgetRatio:br, planRatio:r, lyRatio:lyr, planBudgetRatio:pbr, planLyRatio:plyr};
@@ -4643,8 +4506,10 @@ function renderDeptWeekSummary(dept){
   /* 月次累積行 */
   const ad=allDays();
   const total2=calcTotal(ad);
+  const cumulPds = ad.filter(d=>stores.some(s=>getVal(dept,s,d)!=null));
+  const cumulLabel = cumulPds.length>0 ? `月次累積（${cumulPds.length}日分入力済み）` : "月次累積（未入力）";
   tbody+=`<tr class="cumul">
-    <td class="lc" colspan="2">月次累積</td>`;
+    <td class="lc" colspan="2">${cumulLabel}</td>`;
   tbody+=cols.map(c=>cellHtml(total2,c.key)).join("");
   stores.forEach(s=>{
     const row=calcRow(s,ad);
@@ -4657,11 +4522,12 @@ function renderDeptWeekSummary(dept){
 function renderDeptKPI(dept){
   const m=getMonth();
   const hasUpload=!!(uploadedBudget[dept]?.[m]);
-  /* 実績が1件でも入力されている日付だけを集計対象にする（進捗ベース。renderDeptStores/renderBuSelectGridと同じロジックに統一） */
+  /* 週次サマリーの「月次累積」行(calcTotal(allDays()))と同じ、月全体を集計対象にする */
   const allD=allDays();
-  const inputDays = allD.filter(d => stores.some(s => getVal(dept,s,d)!=null));
-  const ad = inputDays.length>0 ? inputDays : allD;
-  const progressLabel = inputDays.length>0 ? `${inputDays.length}日分の進捗` : "月次累積";
+  const ad = allD;
+  /* 実績入力済みの日数分の予算・昨年実績と比較する（進捗ベース） */
+  const pds = allD.filter(d => stores.some(s => getVal(dept,s,d)!=null));
+  const progressLabel = pds.length>0 ? `${pds.length}日分入力済み` : "未入力";
   let tb=0,ta=0,tl=0,tc=0,tp=0;
   stores.forEach(s=>{
     tb+=sumB(dept,s,ad);
@@ -4669,9 +4535,15 @@ function renderDeptKPI(dept){
     tl+=sumL(dept,s,ad);
     tp+=sumP(dept,s,ad)||0;
   });
-  const r=tc&&tb?ta/tb:null,lr=tc&&tl?ta/tl:null;
-  const pbr=tp&&tb?tp/tb:null;   /* 計画予算比 */
-  const plyr=tp&&tl?tp/tl:null;  /* 計画昨対比 */
+  /* 計画比・昨年比は「実績入力済みの日数分」の予算・昨年実績と比較する（進捗ベース） */
+  let pb=0,pl=0;
+  stores.forEach(s=>{
+    pb+=sumB(dept,s,pds)||0;
+    pl+=sumL(dept,s,pds)||0;
+  });
+  const r=tc&&pb?ta/pb:null,lr=tc&&pl?ta/pl:null;
+  const pbr=tp&&tb?tp/tb:null;   /* 計画予算比（月全体） */
+  const plyr=tp&&tl?tp/tl:null;  /* 計画昨対比（月全体） */
   const el=document.getElementById(`kpi-${dept}`);
   if(!el) return;
   const noUploadBadge=hasUpload?"":`<span style="font-size:10px;background:#fff8e1;color:#e65100;padding:2px 8px;border-radius:10px;border:0.5px solid #ffe082;margin-left:6px">予算未登録</span>`;
@@ -4700,9 +4572,8 @@ function renderDeptKPI(dept){
 
 function renderDeptStores(dept){
   const allD=allDays();
-  /* 実績が入力されている日付だけを対象にする（進捗ベース） */
-  const inputDays = allD.filter(d => stores.some(s => getVal(dept,s,d)!=null));
-  const ad = inputDays.length>0 ? inputDays : allD;
+  /* 表示額（予算・計画・昨年実績）は月全体、比率の分母は進捗ベース */
+  const ad = allD;
 
   const el=document.getElementById(`stores-${dept}`);
   if(!el) return;
@@ -4712,14 +4583,20 @@ function renderDeptStores(dept){
     const p=sumP(dept,s,ad);
     const ly=sumL(dept,s,ad);
 
-    const budgetRatio = a!=null && b ? a/b : null;
+    /* 予算比・計画比・昨対比は「実績入力済みの日数分」の予算・計画・昨年実績と比較する（進捗ベース） */
+    const pds = allD.filter(d => getVal(dept,s,d)!=null);
+    const pb = sumB(dept,s,pds);
+    const pp = sumP(dept,s,pds);
+    const ply = sumL(dept,s,pds);
+
+    const budgetRatio = a!=null && pb ? a/pb : null;
     const budgetDiff  = a!=null ? a-b : null;
 
-    const planBase = p!=null ? p : b;
+    const planBase = pp>0 ? pp : pb;
     const planRatio = a!=null && planBase ? a/planBase : null;
-    const planDiff  = a!=null ? a-planBase : null;
+    const planDiff  = a!=null ? a-(p!=null?p:b) : null;
 
-    const lyRatio = a!=null && ly ? a/ly : null;
+    const lyRatio = a!=null && ply ? a/ply : null;
     const lyDiff  = a!=null ? a-ly : null;
 
     const planBudgetRatio = p!=null && b ? p/b : null;
@@ -5088,7 +4965,6 @@ fillDefaultLY();
 saveAll();
 lastSelectedMonth=getMonth();
 sbuSyncInit();
-budgetSyncInit();
 weatherLoadCache();
 loadNavOrder();
 renderNav();
