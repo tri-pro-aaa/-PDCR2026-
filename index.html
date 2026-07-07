@@ -821,8 +821,8 @@ input.pi:focus{outline:none;border-color:#9c27b0;background:#fff}
     <!-- 日割予算アップロード -->
     <div class="card" style="grid-column:1/-1">
       <div class="card-body">
-        <div class="card-title">📂 日割予算　Excelアップロード</div>
-        <p style="font-size:11px;color:#888;margin-bottom:12px">日割予算Excelをアップロードしてください。ファイル内のBU名を自動判定して反映します。</p>
+        <div class="card-title">📂 日割予算　Excelアップロード（手動）</div>
+        <p style="font-size:11px;color:#888;margin-bottom:12px">日割予算Excelをアップロードしてください。ファイル内のBU名を自動判定して反映します。下の「自動取得」を設定していれば、通常はこちらの手動アップロードは不要です。</p>
         <div class="upload-zone" id="upload-zone"
           ondragover="event.preventDefault();this.classList.add('drag')"
           ondragleave="this.classList.remove('drag')"
@@ -833,6 +833,46 @@ input.pi:focus{outline:none;border-color:#9c27b0;background:#fff}
         </div>
         <input type="file" id="file-input" accept=".xls,.xlsx,.csv" style="display:none" onchange="handleFile(this.files[0])">
         <p style="font-size:11px;color:#888;margin-top:8px">現在の読み込み状況：<span id="upload-status" style="color:#2e7d32">ハード 6月：Product.xls読込済み</span></p>
+      </div>
+    </div>
+
+    <!-- 日割予算 自動取得 -->
+    <div class="card" style="grid-column:1/-1">
+      <div class="card-body">
+        <div class="card-title">🔗 日割予算　自動取得（Googleスプレッドシート）</div>
+        <p style="font-size:11px;color:#888;margin-bottom:10px">
+          日割予算を入力しているGoogleスプレッドシートのURLを設定すると、以後はアップロード操作なしで自動的に反映されます（読み取り専用・一方向の取得のみなので、送信エラーは起きません）。<br>
+          事前にそのスプレッドシートを「リンクを知っている全員が閲覧可」に共有設定してください。シート名は「アップロード用」のままにしてください。
+        </p>
+        <div class="flex-row" style="gap:8px;margin-bottom:8px">
+          <input type="text" id="bsync-url" placeholder="https://docs.google.com/spreadsheets/d/xxxx/edit" style="flex:1;min-width:280px;font-size:12px;padding:6px 8px;border:0.5px solid #c0c0be;border-radius:5px">
+          <button class="btn-sm" onclick="budgetSyncSaveSettings()">保存</button>
+        </div>
+        <div class="flex-row" style="gap:8px;align-items:center">
+          <button class="btn-sm" id="bsync-toggle" onclick="budgetSyncToggle()">自動取得：OFF</button>
+          <button class="btn-sm" onclick="budgetSyncFetchNow(true)">🔄 今すぐ取得</button>
+          <span id="bsync-status" style="font-size:11px;color:#888">未設定</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 計画・実績 自動取得（検証中） -->
+    <div class="card" style="grid-column:1/-1">
+      <div class="card-body">
+        <div class="card-title">🧪 計画・実績　自動取得（Googleスプレッドシート・検証中）</div>
+        <p style="font-size:11px;color:#888;margin-bottom:10px">
+          店舗別の計画・実績を入力しているGoogleスプレッドシートのURLを設定すると、以後は自動的に反映されます（読み取り専用・GET取得のみ）。まずは対象BUを限定して検証してください。<br>
+          事前にそのスプレッドシートを「リンクを知っている全員が閲覧可」に共有設定してください。シート名は「アップロード用」のままにしてください。
+        </p>
+        <div class="flex-row" style="gap:8px;margin-bottom:8px">
+          <input type="text" id="psync-url" placeholder="https://docs.google.com/spreadsheets/d/xxxx/edit" style="flex:1;min-width:280px;font-size:12px;padding:6px 8px;border:0.5px solid #c0c0be;border-radius:5px">
+          <button class="btn-sm" onclick="planActualSyncSaveSettings()">保存</button>
+        </div>
+        <div class="flex-row" style="gap:8px;align-items:center">
+          <button class="btn-sm" id="psync-toggle" onclick="planActualSyncToggle()">自動取得：OFF</button>
+          <button class="btn-sm" onclick="planActualSyncFetchNow(true)">🔄 今すぐ取得</button>
+          <span id="psync-status" style="font-size:11px;color:#888">未設定</span>
+        </div>
       </div>
     </div>
 
@@ -2449,6 +2489,16 @@ function updateCalcCells(dept){
   renderDeptWeekSummary(dept);
   renderDeptTable(dept);
 }
+/* Enterキーで次の日の同じ列（計画 or 実績）へフォーカス移動する */
+function focusNextDayInput(type, dept, s, d){
+  const next = document.getElementById(`${type}-${dept}-${s}-${d+1}`);
+  if(next){
+    next.focus();
+    next.select();
+  } else if(document.activeElement && document.activeElement.blur){
+    document.activeElement.blur();
+  }
+}
 function togOpt(dept,k){
   opts[dept][k]=!opts[dept][k];
   document.getElementById(`tog-${dept}-${k}`).classList.toggle("on",opts[dept][k]);
@@ -2685,6 +2735,142 @@ function parseActualCSV(text, fname){
   /* 現在開いているBUページがあれば再描画 */
   if(currentPage.startsWith("dept-")) renderDept(currentPage.replace("dept-",""));
   return true;
+}
+
+/* ============================================================
+   日割予算 自動取得（Googleスプレッドシート・読み取り専用）
+   ※GETのみで完結する方式。POST送信を伴わないため、
+     以前のGAS同期のような「送信したのに届かない」問題は起きない。
+============================================================ */
+let bsyncSheetId = localStorage.getItem("bsync2_sheet_id") || "";
+let bsyncEnabled = localStorage.getItem("bsync2_enabled") === "1";
+let bsyncTimer = null;
+let bsyncFetching = false;
+const BSYNC_SHEET_NAME = "アップロード用";
+const BSYNC_INTERVAL_MS = 5 * 60 * 1000; /* 5分おきに自動取得 */
+
+function bsyncSetStatus(msg){
+  const el = document.getElementById("bsync-status");
+  if(el) el.textContent = msg;
+}
+function bsyncExtractId(input){
+  const s = (input||"").trim();
+  const m = s.match(/\/d\/([a-zA-Z0-9-_]+)/);
+  if(m) return m[1];
+  return s; /* URLでなくIDそのものが貼られた場合 */
+}
+function budgetSyncSaveSettings(){
+  const input = document.getElementById("bsync-url");
+  const id = bsyncExtractId(input?.value || "");
+  bsyncSheetId = id;
+  localStorage.setItem("bsync2_sheet_id", bsyncSheetId);
+  bsyncSetStatus(bsyncSheetId ? "スプレッドシートIDを保存しました" : "未設定");
+  showToast("日割予算の自動取得先を保存しました");
+}
+function budgetSyncToggle(){
+  if(!bsyncSheetId){
+    showToast("先にスプレッドシートのURLを保存してください");
+    return;
+  }
+  bsyncEnabled = !bsyncEnabled;
+  localStorage.setItem("bsync2_enabled", bsyncEnabled ? "1" : "0");
+  budgetSyncUpdateToggleBtn();
+  if(bsyncEnabled){ budgetSyncStart(); } else { budgetSyncStop(); }
+}
+function budgetSyncUpdateToggleBtn(){
+  const btn = document.getElementById("bsync-toggle");
+  if(!btn) return;
+  btn.textContent = "自動取得：" + (bsyncEnabled ? "ON" : "OFF");
+  btn.className = "btn-sm" + (bsyncEnabled ? " btn-blue" : "");
+}
+function budgetSyncStart(){
+  budgetSyncStop();
+  budgetSyncFetchNow(false);
+  bsyncTimer = setInterval(()=>budgetSyncFetchNow(false), BSYNC_INTERVAL_MS);
+}
+function budgetSyncStop(){
+  if(bsyncTimer){ clearInterval(bsyncTimer); bsyncTimer=null; }
+}
+/* gvizのテーブル1行を配列（parseRowsAuto互換の行データ）に変換 */
+function bsyncRowToArray(row, numCols){
+  const arr = new Array(numCols).fill("");
+  if(row && row.c){
+    row.c.forEach((cell,i)=>{
+      if(!cell) return;
+      arr[i] = (cell.v!=null) ? cell.v : "";
+    });
+  }
+  return arr;
+}
+function budgetSyncFetchNow(manual){
+  if(!bsyncSheetId){
+    if(manual) showToast("先にスプレッドシートのURLを保存してください");
+    return;
+  }
+  if(bsyncFetching) return;
+  bsyncFetching = true;
+  if(manual) bsyncSetStatus("取得中…");
+
+  const cbName = "bsyncCb_" + Date.now();
+  let finished = false;
+  const cleanup = (scriptEl)=>{
+    delete window[cbName];
+    if(scriptEl && scriptEl.parentNode) scriptEl.parentNode.removeChild(scriptEl);
+  };
+  const timeoutId = setTimeout(()=>{
+    if(finished) return;
+    finished = true;
+    bsyncFetching = false;
+    bsyncSetStatus("⚠ 取得に失敗しました（共有設定・シート名を確認してください）");
+    cleanup(scriptEl);
+  }, 15000);
+
+  window[cbName] = function(res){
+    if(finished) return;
+    finished = true;
+    clearTimeout(timeoutId);
+    bsyncFetching = false;
+    cleanup(scriptEl);
+    try{
+      const table = res.table;
+      const numCols = table.cols.length;
+      const rows = table.rows.map(r=>bsyncRowToArray(r, numCols));
+      const result = parseRowsAuto(rows, "自動取得", null, true);
+      if(result){
+        bsyncSetStatus(`最終取得：${new Date().toLocaleTimeString()}（${result.days}日分）`);
+        updateUISelects(); onMonthChange();
+        if(manual) showToast(`日割予算を自動取得しました（${result.days}日分）`);
+      } else {
+        bsyncSetStatus("⚠ データを解析できませんでした（シート形式を確認してください）");
+      }
+    }catch(e){
+      bsyncSetStatus("⚠ 取得データの解析に失敗しました");
+    }
+  };
+
+  const scriptEl = document.createElement("script");
+  const sheetParam = encodeURIComponent(BSYNC_SHEET_NAME);
+  scriptEl.src = `https://docs.google.com/spreadsheets/d/${bsyncSheetId}/gviz/tq?sheet=${sheetParam}&headers=0&tqx=out:json;responseHandler:${cbName}`;
+  scriptEl.onerror = ()=>{
+    if(finished) return;
+    finished = true;
+    clearTimeout(timeoutId);
+    bsyncFetching = false;
+    bsyncSetStatus("⚠ 取得に失敗しました（共有設定・シート名を確認してください）");
+    cleanup(scriptEl);
+  };
+  document.head.appendChild(scriptEl);
+}
+function budgetSyncInit(){
+  const input = document.getElementById("bsync-url");
+  if(input && bsyncSheetId) input.value = `https://docs.google.com/spreadsheets/d/${bsyncSheetId}/edit`;
+  budgetSyncUpdateToggleBtn();
+  if(bsyncSheetId && bsyncEnabled){
+    bsyncSetStatus("接続中…");
+    budgetSyncStart();
+  } else if(bsyncSheetId){
+    bsyncSetStatus("自動取得はOFFです");
+  }
 }
 
 function parseRowsAuto(rows, fname, storeHint, silent){
@@ -4681,9 +4867,9 @@ function renderDeptTable(dept){
           const plyr=p!=null&&ly?p/ly:null;
           if(daily) tbody+=`<td class="${si===0?'sep':''}" style="color:#aaa">${f(b)}</td>`;
           if(lyRaw) tbody+=`<td class="${!daily&&si===0?'sep':''}" style="color:#999">${f(ly)}</td>`;
-          if(plan)  tbody+=`<td class="${!daily&&!lyRaw&&si===0?'sep':''}"><input class="pi" type="number" value="${p!=null?p:''}" placeholder="—" onchange="up2('${dept}','${s}',${d},this.value)" onkeydown="if(event.key==='Enter'){up2('${dept}','${s}',${d},this.value);this.blur()}"></td>`;
+          if(plan)  tbody+=`<td class="${!daily&&!lyRaw&&si===0?'sep':''}"><input id="pi-${dept}-${s}-${d}" class="pi" type="number" value="${p!=null?p:''}" placeholder="—" onchange="up2('${dept}','${s}',${d},this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault();up2('${dept}','${s}',${d},this.value);focusNextDayInput('pi','${dept}','${s}',${d})}"></td>`;
           if(!daily&&!lyRaw&&!plan) tbody+=`<td class="${si===0?'sep':''}"></td>`;
-          tbody+=`<td><input class="ai${auto?' ly':''}" type="number" value="${a!=null?a:''}" placeholder="—" onchange="ua('${dept}','${s}',${d},this.value)" onkeydown="if(event.key==='Enter'){ua('${dept}','${s}',${d},this.value);this.blur()}" title="${auto?'昨対100%自動入力（上書き可）':''}"></td>`;
+          tbody+=`<td><input id="ai-${dept}-${s}-${d}" class="ai${auto?' ly':''}" type="number" value="${a!=null?a:''}" placeholder="—" onchange="ua('${dept}','${s}',${d},this.value)" onkeydown="if(event.key==='Enter'){event.preventDefault();ua('${dept}','${s}',${d},this.value);focusNextDayInput('ai','${dept}','${s}',${d})}" title="${auto?'昨対100%自動入力（上書き可）':''}"></td>`;
           if(budgetRatio) tbody+=`<td class="${rc(br)}">${fr(br)}</td>`;
           tbody+=`<td class="${rc(r)}">${fr(r)}</td>`;
           if(lastyear) tbody+=`<td class="${rc(lyr)}">${fr(lyr)}</td>`;
@@ -4902,6 +5088,7 @@ fillDefaultLY();
 saveAll();
 lastSelectedMonth=getMonth();
 sbuSyncInit();
+budgetSyncInit();
 weatherLoadCache();
 loadNavOrder();
 renderNav();
