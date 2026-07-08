@@ -82,9 +82,9 @@ input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
 .tbl-wrap{overflow-x:auto}
 table{width:100%;border-collapse:collapse;font-size:11px}
 thead{position:sticky;top:0;z-index:5}
-th{background:#f5f5f3;color:#666;font-weight:500;padding:6px 7px;text-align:center;border-bottom:0.5px solid #e0e0de;white-space:nowrap}
+th{background:#f5f5f3;color:#666;font-weight:500;padding:6px 7px;text-align:center;border-bottom:0.5px solid #e0e0de;border-right:0.5px solid #ececea;white-space:nowrap}
 th.sh{background:#1e3a5f;color:#fff}
-td{padding:5px 7px;text-align:right;border-bottom:0.5px solid #f0f0ee;white-space:nowrap}
+td{padding:5px 7px;text-align:right;border-bottom:0.5px solid #f0f0ee;border-right:0.5px solid #f5f5f3;white-space:nowrap}
 td.lc{text-align:left;color:#666;font-size:11px}
 td.cc{text-align:center;font-size:11px}
 tr:last-child td{border-bottom:none}
@@ -96,6 +96,8 @@ tr.sum-row td{background:#e8f5e9;font-weight:500;color:#1b5e20}
 .ok{color:#2e7d32}.warn{color:#e65100}.ng{color:#c62828}
 .dp{color:#2e7d32}.dn{color:#c62828}
 .sep{border-left:1px solid #e0e0de !important}
+/* 週次推移テーブルなど、複数列をブロック単位でまとめて見せたい箇所の区切り線 */
+.blk-end{border-right:1.5px solid #b0b0ae !important}
 
 /* ========== 入力セル ========== */
 input.ai{width:58px;border:0.5px solid #b0c8e8;border-radius:4px;padding:2px 4px;text-align:right;font-size:11px;background:#e6f1fb;color:#185fa5;font-family:inherit}
@@ -3487,6 +3489,11 @@ const CHANGELOG = [
     author: "Claude",
     content: "「イベントナレッジ機能」を再実装。以前のセッションで実装済みだったが、その後の更新作業で失われていたため、いただいた仕様（登録・期間一括登録・カテゴリ7種・全BU共通/BU固有の切り替え・編集・削除・スプレッドシート同期）に基づき復元。日次テーブルに「イベント」列を追加し、セルをクリックするとモーダルで登録・編集・削除ができる。events[dept]（BU固有）とevents.ALL（全BU共通）で管理し、eventsForDay()で当日分を合算表示。saveAll/loadAllにも統合し、端末をまたいだ同期にも対応。"
   },
+  {
+    date: "2026-07-06",
+    author: "Claude",
+    content: "サマリーページの「週次推移（BU×週）」テーブルに「昨対差」列を追加（計画比・差異に加えて、実績−昨年実績の差額を表示）。あわせて、全テーブル共通で薄い縦罫線を追加し、週次推移テーブルは各週ブロックの区切りに太めの線を入れて見やすく改善。"
+  },
 ];
 
 function renderChangelog(){
@@ -4299,10 +4306,10 @@ function renderSummary(){
   const days=daysInMonth(2026,m);
   const validWeeks=getWeeks().filter(w=>w.s<=days);
   let thead=`<tr><th style="text-align:left">BU</th>`;
-  validWeeks.forEach(w=>thead+=`<th colspan="2">${w.label}</th>`);
-  thead+=`<th colspan="2">累積（進捗分）</th></tr><tr><th></th>`;
-  validWeeks.forEach(()=>thead+=`<th>計画比</th><th>差異</th>`);
-  thead+=`<th>計画比</th><th>差異</th></tr>`;
+  validWeeks.forEach(w=>thead+=`<th colspan="3" class="blk-end">${w.label}</th>`);
+  thead+=`<th colspan="3">累積（進捗分）</th></tr><tr><th></th>`;
+  validWeeks.forEach(()=>thead+=`<th>計画比</th><th>差異</th><th class="blk-end">昨対差</th>`);
+  thead+=`<th>計画比</th><th>差異</th><th>昨対差</th></tr>`;
   document.getElementById("sum-thead").innerHTML=thead;
 
   /* 各週ごとに「実績入力済みの日付」だけに絞る */
@@ -4314,28 +4321,30 @@ function renderSummary(){
     tbody+=`<tr><td class="lc">${dept}</td>`;
     validWeeks.forEach((w,wi)=>{
       const wd=weekInputDays(wi);
-      if(wd.length===0){ tbody+=`<td>—</td><td>—</td>`; return; }
-      const a=deptSumA(dept,wd),b=deptSumB(dept,wd),r3=deptRatio(dept,wd);
+      if(wd.length===0){ tbody+=`<td>—</td><td>—</td><td class="blk-end">—</td>`; return; }
+      const a=deptSumA(dept,wd),b=deptSumB(dept,wd),r3=deptRatio(dept,wd),l=deptSumL(dept,wd);
       const dv=a!=null?a-b:null;
-      tbody+=`<td class="${rc(r3)}">${fr(r3)}</td><td class="${dc(dv)}">${fd(dv)}</td>`;
+      const lv=a!=null&&l?a-l:null;
+      tbody+=`<td class="${rc(r3)}">${fr(r3)}</td><td class="${dc(dv)}">${fd(dv)}</td><td class="${dc(lv)} blk-end">${fd(lv)}</td>`;
     });
     const a=deptSumA(dept,ad),b=deptSumB(dept,ad),r4=deptRatio(dept,ad),dv=a!=null?a-b:null;
-    tbody+=`<td class="${rc(r4)}">${fr(r4)}</td><td class="${dc(dv)}">${fd(dv)}</td></tr>`;
+    const l4=deptSumL(dept,ad),lv4=a!=null&&l4?a-l4:null;
+    tbody+=`<td class="${rc(r4)}">${fr(r4)}</td><td class="${dc(dv)}">${fd(dv)}</td><td class="${dc(lv4)}">${fd(lv4)}</td></tr>`;
   });
   /* 合計行 */
   tbody+=`<tr class="sum-row"><td class="lc">合計</td>`;
   validWeeks.forEach((w,wi)=>{
     const wd=weekInputDays(wi);
-    if(wd.length===0){ tbody+=`<td>—</td><td>—</td>`; return; }
-    let tb2=0,ta2=0,has=false;
-    DEPTS.forEach(d=>{tb2+=deptSumB(d,wd);const a=deptSumA(d,wd);if(a!=null){ta2+=a;has=true;}});
-    const r5=has&&tb2?ta2/tb2:null,dv=has?ta2-tb2:null;
-    tbody+=`<td class="${rc(r5)}">${fr(r5)}</td><td class="${dc(dv)}">${fd(dv)}</td>`;
+    if(wd.length===0){ tbody+=`<td>—</td><td>—</td><td class="blk-end">—</td>`; return; }
+    let tb2=0,ta2=0,tl2=0,has=false;
+    DEPTS.forEach(d=>{tb2+=deptSumB(d,wd);tl2+=deptSumL(d,wd);const a=deptSumA(d,wd);if(a!=null){ta2+=a;has=true;}});
+    const r5=has&&tb2?ta2/tb2:null,dv=has?ta2-tb2:null,lv=has&&tl2?ta2-tl2:null;
+    tbody+=`<td class="${rc(r5)}">${fr(r5)}</td><td class="${dc(dv)}">${fd(dv)}</td><td class="${dc(lv)} blk-end">${fd(lv)}</td>`;
   });
-  let tb3=0,ta3=0,has3=false;
-  DEPTS.forEach(d=>{tb3+=deptSumB(d,ad);const a=deptSumA(d,ad);if(a!=null){ta3+=a;has3=true;}});
-  const r6=has3&&tb3?ta3/tb3:null,dv3=has3?ta3-tb3:null;
-  tbody+=`<td class="${rc(r6)}">${fr(r6)}</td><td class="${dc(dv3)}">${fd(dv3)}</td></tr>`;
+  let tb3=0,ta3=0,tl3=0,has3=false;
+  DEPTS.forEach(d=>{tb3+=deptSumB(d,ad);tl3+=deptSumL(d,ad);const a=deptSumA(d,ad);if(a!=null){ta3+=a;has3=true;}});
+  const r6=has3&&tb3?ta3/tb3:null,dv3=has3?ta3-tb3:null,lv3=has3&&tl3?ta3-tl3:null;
+  tbody+=`<td class="${rc(r6)}">${fr(r6)}</td><td class="${dc(dv3)}">${fd(dv3)}</td><td class="${dc(lv3)}">${fd(lv3)}</td></tr>`;
   document.getElementById("sum-tbody").innerHTML=tbody;
 }
 
