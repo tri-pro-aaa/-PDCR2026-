@@ -1973,6 +1973,30 @@ function weatherFetchHistorical(year, month){
     if(weatherApplyDaily(res)) renderCurrent();
   }).catch(()=>{});
 }
+/* 今年の「昨日まで」の実測天気を取得し、予報でキャッシュされていた値を実測値で上書きする。
+   天気予報APIは16日先までの予報しか返さず、既に過ぎた日については実測データに
+   更新しないと、古い予報のまま（または未取得のまま）になってしまうため */
+function weatherFetchActualThisMonth(m){
+  const today = new Date();
+  const y = 2026;
+  const days = daysInMonth(y, m);
+  const isCurrentMonth = (today.getFullYear()===y && today.getMonth()+1===m);
+  const isPastMonth = (today.getFullYear()>y) || (today.getFullYear()===y && today.getMonth()+1>m);
+  const lastPastDay = isPastMonth ? days : (isCurrentMonth ? today.getDate()-1 : 0);
+  if(lastPastDay < 1) return; /* まだ過去日が存在しない月（未来月）は何もしない */
+  const start = `${y}-${pad2(m)}-01`;
+  const end = `${y}-${pad2(m)}-${pad2(lastPastDay)}`;
+  /* 「今日の日付」単位でキャッシュキーを分けることで、日が変わったら自動的に再取得される */
+  const cacheKey = `weather_actual_fetched_${y}_${m}_${lastPastDay}`;
+  if(localStorage.getItem(cacheKey)) return;
+  const url = `https://archive-api.open-meteo.com/v1/archive?latitude=${WEATHER_LAT}&longitude=${WEATHER_LON}&start_date=${start}&end_date=${end}&daily=weathercode,temperature_2m_max,temperature_2m_min&timezone=Asia%2FTokyo`;
+  fetch(url).then(r=>r.json()).then(res=>{
+    if(weatherApplyDaily(res)){
+      localStorage.setItem(cacheKey, "1");
+      renderCurrent();
+    }
+  }).catch(()=>{});
+}
 /* 今年の予報（16日先まで）を取得。6時間以内に取得済みなら再取得しない */
 function weatherFetchForecast(){
   const lastFetch = localStorage.getItem("weather_forecast_fetched_at");
@@ -3519,6 +3543,11 @@ const CHANGELOG = [
     author: "Claude",
     content: "日次テーブルの「計画」「実績」入力欄で、Enterキーを押すと同じ店舗・同じ列の翌日の入力欄へ自動でフォーカスが移動するように変更（Excelのような連続入力が可能に）。月末など翌日が無い場合は何もしない。"
   },
+  {
+    date: "2026-07-06",
+    author: "Claude",
+    content: "天気表示について、今年の日付のうち既に過ぎた日は「予報」ではなく実測データ（Open-Meteoのarchive API）で取得・上書きするよう修正。これまでは16日先までの予報データしか取得しておらず、過去日は古い予報のまま（または未取得）だった。日付が変わるたびに自動で最新の実測データに更新される。"
+  },
 ];
 
 function renderChangelog(){
@@ -4876,9 +4905,10 @@ function renderDeptTable(dept){
   if(budgetRatio)span++;if(lastyear)span++;if(diff)span++;
   if(planBudgetRatio)span++;if(planLyRatio)span++;
 
-  /* 天気データを必要に応じて取得（昨年同月の実測・今年の予報） */
+  /* 天気データを必要に応じて取得（昨年同月の実測・今年の過去日の実測・今年の予報） */
   if(weather){
     weatherFetchHistorical(2025, m);
+    weatherFetchActualThisMonth(m);
     weatherFetchForecast();
   }
 
