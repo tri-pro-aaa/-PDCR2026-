@@ -88,8 +88,8 @@ td{padding:5px 7px;text-align:right;border-bottom:0.5px solid #f0f0ee;border-rig
 td.lc{text-align:left;color:#666;font-size:11px}
 td.cc{text-align:center;font-size:11px}
 tr:last-child td{border-bottom:none}
-tr.sun td{color:#d32f2f}
-tr.sat td{color:#1565c0}
+tr.sun td{color:#e65100;background:#fff3e0}
+tr.sat td{color:#2e7d32;background:#e8f5e9}
 tr.sub td{background:#f5f5f3;font-weight:500;border-top:0.5px solid #c0c0be;border-bottom:0.5px solid #c0c0be}
 tr.cumul td{background:#e6f1fb;font-weight:500;color:#185fa5;border-top:1px solid #85b7eb}
 tr.sum-row td{background:#e8f5e9;font-weight:500;color:#1b5e20}
@@ -3493,6 +3493,11 @@ const CHANGELOG = [
     date: "2026-07-06",
     author: "Claude",
     content: "サマリーページの「週次推移（BU×週）」テーブルに「昨対差」列を追加（計画比・差異に加えて、実績−昨年実績の差額を表示）。あわせて、全テーブル共通で薄い縦罫線を追加し、週次推移テーブルは各週ブロックの区切りに太めの線を入れて見やすく改善。"
+  },
+  {
+    date: "2026-07-06",
+    author: "Claude",
+    content: "日次テーブルの土日の行に背景色を追加（日曜=薄いオレンジ、土曜=薄いグリーン。文字色もそれぞれ濃いオレンジ・濃いグリーンに統一）。曜日の区別が一目で分かるように改善。"
   },
 ];
 
