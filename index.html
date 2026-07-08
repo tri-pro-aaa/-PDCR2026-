@@ -3548,6 +3548,11 @@ const CHANGELOG = [
     author: "Claude",
     content: "天気表示について、今年の日付のうち既に過ぎた日は「予報」ではなく実測データ（Open-Meteoのarchive API）で取得・上書きするよう修正。これまでは16日先までの予報データしか取得しておらず、過去日は古い予報のまま（または未取得）だった。日付が変わるたびに自動で最新の実測データに更新される。"
   },
+  {
+    date: "2026-07-06",
+    author: "Claude",
+    content: "「計画予算比」「計画昨対比」（計画÷予算、計画÷昨年実績）は実績の有無に関係ない指標にもかかわらず、以前の進捗ベース化の修正で「実績入力済みの日だけ」を対象に計算してしまっており、月次累積・KPIカード・店舗別カード・ホーム画面のいずれも、実績が一部の週にしか無い場合に数値が不自然に低く出る不具合があった。計画予算比・計画昨対比だけは常に期間全体（週なら週全体、月次累積なら月全体）の計画・予算・昨年実績で計算するよう修正（renderDeptKPI・renderDeptStores・renderBuSelectGrid・renderDeptWeekSummaryの4箇所）。シミュレーションで68.6%→91.8%相当の改善を確認。"
+  },
 ];
 
 function renderChangelog(){
@@ -3587,8 +3592,10 @@ function renderBuSelectGrid(){
     const lyRatio   = a!=null && ly ? a/ly : null;
     const lyDiff    = a!=null ? a-ly : null;
 
-    const planBudgetRatio = p!=null && b ? p/b : null;
-    const planLyRatio     = p!=null && ly ? p/ly : null;
+    /* 計画予算比・計画昨対比は実績の有無に関係ない指標なので、進捗日数ではなく月全体(allD)で計算する */
+    const fb=deptSumB(dept,allD), fp=deptSumP(dept,allD), fly=deptSumL(dept,allD);
+    const planBudgetRatio = fp!=null && fb ? fp/fb : null;
+    const planLyRatio     = fp!=null && fly ? fp/fly : null;
 
     return `<div class="bu-card" onclick="switchPage('dept-${dept}')">
       <div class="bu-card-name">${dept}</div>
@@ -4697,17 +4704,22 @@ function renderDeptWeekSummary(dept){
      ただし、その週（または月）に実績が1件も無い場合は、従来通り全日程の予算をそのまま表示する */
   const inputDaySet = new Set(allDays().filter(d => stores.some(s=>getVal(dept,s,d)!=null)));
 
-  /* 店舗ごとの計算結果を{budget,plan,actual,planRatio,lyRatio}にまとめて返す */
-  function calcRow(s,ds){
+  /* 店舗ごとの計算結果を{budget,plan,actual,planRatio,lyRatio}にまとめて返す。
+     fullDsを渡すと、計画予算比・計画昨対比（実績の有無に関係ない指標）だけは
+     dsではなくfullDs（週や月の全日程）で計算する。省略時はdsをそのまま使う */
+  function calcRow(s,ds,fullDs){
+    fullDs = fullDs || ds;
     const b=sumB(dept,s,ds), p=sumP(dept,s,ds), a=sumA(dept,s,ds);
     const r=ratioW(dept,s,ds);
     const br=a!=null&&b?a/b:null;
     const ly=sumL(dept,s,ds), lyr=a!=null&&ly?a/ly:null;
-    const pbr=p!=null&&b?p/b:null;
-    const plyr=p!=null&&ly?p/ly:null;
+    const fb=sumB(dept,s,fullDs), fp=sumP(dept,s,fullDs), fly=sumL(dept,s,fullDs);
+    const pbr=fp!=null&&fb?fp/fb:null;
+    const plyr=fp!=null&&fly?fp/fly:null;
     return {budget:b, lyRaw:ly, plan:p, actual:a, budgetRatio:br, planRatio:r, lyRatio:lyr, planBudgetRatio:pbr, planLyRatio:plyr};
   }
-  function calcTotal(ds){
+  function calcTotal(ds,fullDs){
+    fullDs = fullDs || ds;
     let tb=0,tp=0,ta=0,tl=0,hasTa=false;
     stores.forEach(s=>{
       tb+=sumB(dept,s,ds)||0;
@@ -4718,8 +4730,14 @@ function renderDeptWeekSummary(dept){
     const r=hasTa&&tp?ta/tp:null;
     const br=hasTa&&tb?ta/tb:null;
     const lyr=hasTa&&tl?ta/tl:null;
-    const pbr=tp&&tb?tp/tb:null;
-    const plyr=tp&&tl?tp/tl:null;
+    let ftb=0,ftp=0,ftl=0;
+    stores.forEach(s=>{
+      ftb+=sumB(dept,s,fullDs)||0;
+      ftp+=sumP(dept,s,fullDs)||0;
+      ftl+=sumL(dept,s,fullDs)||0;
+    });
+    const pbr=ftp&&ftb?ftp/ftb:null;
+    const plyr=ftp&&ftl?ftp/ftl:null;
     return {budget:tb, lyRaw:tl, plan:tp, actual:hasTa?ta:null, budgetRatio:br, planRatio:r, lyRatio:lyr, planBudgetRatio:pbr, planLyRatio:plyr};
   }
   function cellHtml(row,key){
@@ -4754,13 +4772,13 @@ function renderDeptWeekSummary(dept){
     const fullWd=wdays(wi);
     const inputWd=fullWd.filter(d=>inputDaySet.has(d));
     const wd = inputWd.length>0 ? inputWd : fullWd;
-    const total=calcTotal(wd);
+    const total=calcTotal(wd,fullWd);
     tbody+=`<tr class="sub">
       <td class="lc" style="font-weight:500">${w.label}</td>
       <td class="lc" style="color:#aaa;font-size:10px">${m}/${w.s}〜${m}/${Math.min(w.e,days)}</td>`;
     tbody+=cols.map(c=>cellHtml(total,c.key)).join("");
     stores.forEach(s=>{
-      const row=calcRow(s,wd);
+      const row=calcRow(s,wd,fullWd);
       tbody+=cols.map(c=>cellHtml(row,c.key)).join("");
     });
     tbody+=`</tr>`;
@@ -4770,12 +4788,12 @@ function renderDeptWeekSummary(dept){
   const fullAd=allDays();
   const inputAd=fullAd.filter(d=>inputDaySet.has(d));
   const ad = inputAd.length>0 ? inputAd : fullAd;
-  const total2=calcTotal(ad);
+  const total2=calcTotal(ad,fullAd);
   tbody+=`<tr class="cumul">
     <td class="lc" colspan="2">月次累積</td>`;
   tbody+=cols.map(c=>cellHtml(total2,c.key)).join("");
   stores.forEach(s=>{
-    const row=calcRow(s,ad);
+    const row=calcRow(s,ad,fullAd);
     tbody+=cols.map(c=>cellHtml(row,c.key)).join("");
   });
   tbody+=`</tr>`;
@@ -4798,8 +4816,17 @@ function renderDeptKPI(dept){
     tp+=sumP(dept,s,ad)||0;
   });
   const r=tc&&tb?ta/tb:null,lr=tc&&tl?ta/tl:null;
-  const pbr=tp&&tb?tp/tb:null;   /* 計画予算比 */
-  const plyr=tp&&tl?tp/tl:null;  /* 計画昨対比 */
+  /* 計画予算比・計画昨対比は実績の有無に関係ない指標（計画と予算/昨年実績を比べるだけ）なので、
+     進捗日数ではなく月全体(allD)で計算する。進捗分(ad)で計算すると、実績未入力の週の計画が
+     反映されず、比率が不自然に偏ってしまうため */
+  let ftb=0,ftp=0,ftl=0;
+  stores.forEach(s=>{
+    ftb+=sumB(dept,s,allD);
+    ftp+=sumP(dept,s,allD)||0;
+    ftl+=sumL(dept,s,allD);
+  });
+  const pbr=ftp&&ftb?ftp/ftb:null;   /* 計画予算比 */
+  const plyr=ftp&&ftl?ftp/ftl:null;  /* 計画昨対比 */
   const el=document.getElementById(`kpi-${dept}`);
   if(!el) return;
   const noUploadBadge=hasUpload?"":`<span style="font-size:10px;background:#fff8e1;color:#e65100;padding:2px 8px;border-radius:10px;border:0.5px solid #ffe082;margin-left:6px">予算未登録</span>`;
@@ -4850,8 +4877,10 @@ function renderDeptStores(dept){
     const lyRatio = a!=null && ly ? a/ly : null;
     const lyDiff  = a!=null ? a-ly : null;
 
-    const planBudgetRatio = p!=null && b ? p/b : null;
-    const planLyRatio     = p!=null && ly ? p/ly : null;
+    /* 計画予算比・計画昨対比は実績の有無に関係ない指標なので、進捗日数ではなく月全体(allD)で計算する */
+    const fb=sumB(dept,s,allD), fp=sumP(dept,s,allD), fly=sumL(dept,s,allD);
+    const planBudgetRatio = fp!=null && fb ? fp/fb : null;
+    const planLyRatio     = fp!=null && fly ? fp/fly : null;
 
     return `<div class="store-card">
       <div class="store-name">${s}店</div>
