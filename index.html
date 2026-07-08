@@ -2663,6 +2663,16 @@ function updateCalcCells(dept){
   renderDeptWeekSummary(dept);
   renderDeptTable(dept);
 }
+/* エンターキーで、同じ列（計画 or 実績）・同じ店舗の「翌日」の入力欄へフォーカスを移す。
+   ua()/up2()はrenderDeptTable()を同期的に呼び直すため、この関数が呼ばれる時点でDOMは
+   既に再構築済み。翌日が無い（月末）場合や、行が非表示の場合は何もしない（安全にno-op）*/
+function focusNextDayInput(prefix, dept, s, d){
+  const next = document.getElementById(`${prefix}-${dept}-${s}-${d+1}`);
+  if(next){
+    next.focus();
+    if(next.select) next.select();
+  }
+}
 function togOpt(dept,k){
   opts[dept][k]=!opts[dept][k];
   document.getElementById(`tog-${dept}-${k}`).classList.toggle("on",opts[dept][k]);
@@ -3503,6 +3513,11 @@ const CHANGELOG = [
     date: "2026-07-06",
     author: "Claude",
     content: "週次サマリーテーブル（週次推移・BU個別ページの週別表）の各週小計行・月次累積行が、実績入力有無に関わらず週/月全体の日数分の予算・計画・昨年実績を分母にしていたため、実績が一部の日にしか入っていない週の予算比・計画比・昨対比が不自然に低く出る不具合を修正。実績が入力されている日付だけを対象に集計する進捗ベースの計算に統一（KPIカードと同じ考え方）。実績が1件も無い週・月はこれまで通り全日程の予算をそのまま表示する。"
+  },
+  {
+    date: "2026-07-06",
+    author: "Claude",
+    content: "日次テーブルの「計画」「実績」入力欄で、Enterキーを押すと同じ店舗・同じ列の翌日の入力欄へ自動でフォーカスが移動するように変更（Excelのような連続入力が可能に）。月末など翌日が無い場合は何もしない。"
   },
 ];
 
@@ -4954,9 +4969,9 @@ function renderDeptTable(dept){
           const plyr=p!=null&&ly?p/ly:null;
           if(daily) tbody+=`<td class="${si===0?'sep':''}" style="color:#aaa">${f(b)}</td>`;
           if(lyRaw) tbody+=`<td class="${!daily&&si===0?'sep':''}" style="color:#999">${f(ly)}</td>`;
-          if(plan)  tbody+=`<td class="${!daily&&!lyRaw&&si===0?'sep':''}"><input class="pi" type="number" value="${p!=null?p:''}" placeholder="—" onchange="up2('${dept}','${s}',${d},this.value)" onkeydown="if(event.key==='Enter'){up2('${dept}','${s}',${d},this.value);this.blur()}"></td>`;
+          if(plan)  tbody+=`<td class="${!daily&&!lyRaw&&si===0?'sep':''}"><input id="pi-${dept}-${s}-${d}" class="pi" type="number" value="${p!=null?p:''}" placeholder="—" onchange="up2('${dept}','${s}',${d},this.value)" onkeydown="if(event.key==='Enter'){up2('${dept}','${s}',${d},this.value);focusNextDayInput('pi','${dept}','${s}',${d})}"></td>`;
           if(!daily&&!lyRaw&&!plan) tbody+=`<td class="${si===0?'sep':''}"></td>`;
-          tbody+=`<td><input class="ai${auto?' ly':''}" type="number" value="${a!=null?a:''}" placeholder="—" onchange="ua('${dept}','${s}',${d},this.value)" onkeydown="if(event.key==='Enter'){ua('${dept}','${s}',${d},this.value);this.blur()}" title="${auto?'昨対100%自動入力（上書き可）':''}"></td>`;
+          tbody+=`<td><input id="ai-${dept}-${s}-${d}" class="ai${auto?' ly':''}" type="number" value="${a!=null?a:''}" placeholder="—" onchange="ua('${dept}','${s}',${d},this.value)" onkeydown="if(event.key==='Enter'){ua('${dept}','${s}',${d},this.value);focusNextDayInput('ai','${dept}','${s}',${d})}" title="${auto?'昨対100%自動入力（上書き可）':''}"></td>`;
           if(budgetRatio) tbody+=`<td class="${rc(br)}">${fr(br)}</td>`;
           tbody+=`<td class="${rc(r)}">${fr(r)}</td>`;
           if(lastyear) tbody+=`<td class="${rc(lyr)}">${fr(lyr)}</td>`;
