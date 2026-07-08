@@ -3499,6 +3499,11 @@ const CHANGELOG = [
     author: "Claude",
     content: "日次テーブルの土日の行に背景色を追加（日曜=薄いオレンジ、土曜=薄いグリーン。文字色もそれぞれ濃いオレンジ・濃いグリーンに統一）。曜日の区別が一目で分かるように改善。"
   },
+  {
+    date: "2026-07-06",
+    author: "Claude",
+    content: "週次サマリーテーブル（週次推移・BU個別ページの週別表）の各週小計行・月次累積行が、実績入力有無に関わらず週/月全体の日数分の予算・計画・昨年実績を分母にしていたため、実績が一部の日にしか入っていない週の予算比・計画比・昨対比が不自然に低く出る不具合を修正。実績が入力されている日付だけを対象に集計する進捗ベースの計算に統一（KPIカードと同じ考え方）。実績が1件も無い週・月はこれまで通り全日程の予算をそのまま表示する。"
+  },
 ];
 
 function renderChangelog(){
@@ -4642,6 +4647,11 @@ function renderDeptWeekSummary(dept){
   });
 
   const validWeeks=getWeeks().filter(w=>w.s<=days);
+  /* 実績が1件でも入力されている日付の集合（renderDeptKPIと同じ考え方）。
+     各週・月次累積とも、予算・計画・昨年実績の集計対象をこの日付だけに絞ることで、
+     「まだ実績が入っていない日」の予算まで分母に含めて比率が不自然に低くなるのを防ぐ。
+     ただし、その週（または月）に実績が1件も無い場合は、従来通り全日程の予算をそのまま表示する */
+  const inputDaySet = new Set(allDays().filter(d => stores.some(s=>getVal(dept,s,d)!=null)));
 
   /* 店舗ごとの計算結果を{budget,plan,actual,planRatio,lyRatio}にまとめて返す */
   function calcRow(s,ds){
@@ -4697,7 +4707,9 @@ function renderDeptWeekSummary(dept){
   /* 各週の小計行 */
   let tbody="";
   validWeeks.forEach((w,wi)=>{
-    const wd=wdays(wi);
+    const fullWd=wdays(wi);
+    const inputWd=fullWd.filter(d=>inputDaySet.has(d));
+    const wd = inputWd.length>0 ? inputWd : fullWd;
     const total=calcTotal(wd);
     tbody+=`<tr class="sub">
       <td class="lc" style="font-weight:500">${w.label}</td>
@@ -4711,7 +4723,9 @@ function renderDeptWeekSummary(dept){
   });
 
   /* 月次累積行 */
-  const ad=allDays();
+  const fullAd=allDays();
+  const inputAd=fullAd.filter(d=>inputDaySet.has(d));
+  const ad = inputAd.length>0 ? inputAd : fullAd;
   const total2=calcTotal(ad);
   tbody+=`<tr class="cumul">
     <td class="lc" colspan="2">月次累積</td>`;
