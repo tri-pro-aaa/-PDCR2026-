@@ -337,6 +337,11 @@ input.pi:focus{outline:none;border-color:#9c27b0;background:#fff}
 <body>
 <div class="toast" id="toast"></div>
 
+<!-- ====== イベントナレッジ登録モーダル ====== -->
+<div id="event-modal-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:1000;align-items:center;justify-content:center;padding:16px" onclick="if(event.target===this) cancelEventEdit()">
+  <div id="event-modal-box" style="background:#fff;border-radius:12px;padding:20px;max-width:480px;width:100%;max-height:85vh;overflow:auto"></div>
+</div>
+
 <!-- ====== ナビゲーション ====== -->
 <div class="nav" id="main-nav">
   <div class="nav-tabs-wrap" id="nav-tabs-wrap"></div>
@@ -1076,6 +1081,9 @@ let stores = [...STORES_DEFAULT];       /* アップロードで更新 */
 
 /* actuals / plans: {事業部: {店舗: {日: value}}} */
 let actuals = {}, plans = {};
+/* イベントナレッジ機能：events[dept]=BU固有のイベント配列、events.ALL=全BU共通のイベント配列 */
+let events = { ALL: [] };
+DEPTS.forEach(d=>events[d]=[]);
 DEPTS.forEach(d=>{actuals[d]={};plans[d]={};});
 
 /* 週タブ状態: {事業部: "all"|number} */
@@ -2025,7 +2033,9 @@ function saveAll(m){
     DEPTS.forEach(d=>{
       localStorage.setItem(sk(d,"actuals",month),JSON.stringify(actuals[d]||{}));
       localStorage.setItem(sk(d,"plans",month),  JSON.stringify(plans[d]||{}));
+      localStorage.setItem(sk(d,"events",month), JSON.stringify(events[d]||[]));
     });
+    localStorage.setItem(`sbu2_ALL_${month}_events`, JSON.stringify(events.ALL||[]));
     showSaveBadge(true);
   }catch(e){showSaveBadge(false);}
 }
@@ -2317,21 +2327,223 @@ function loadAll(){
     try{
       const a=localStorage.getItem(sk(dept,"actuals"));
       const p=localStorage.getItem(sk(dept,"plans"));
+      const ev=localStorage.getItem(sk(dept,"events"));
       actuals[dept]=a?JSON.parse(a):{};
       plans[dept]  =p?JSON.parse(p):{};
+      events[dept] =ev?JSON.parse(ev):[];
       stores.forEach(s=>{
         if(actuals[dept][s]) actuals[dept][s]=Object.fromEntries(Object.entries(actuals[dept][s]).map(([k,v])=>[+k,v]));
         else actuals[dept][s]={};
         if(plans[dept][s])   plans[dept][s]=Object.fromEntries(Object.entries(plans[dept][s]).map(([k,v])=>[+k,v]));
         else plans[dept][s]={};
       });
-    }catch(e){actuals[dept]={};plans[dept]={};}
+    }catch(e){actuals[dept]={};plans[dept]={};events[dept]=[];}
   });
+  try{
+    const evAll=localStorage.getItem(`sbu2_ALL_${getMonth()}_events`);
+    events.ALL = evAll?JSON.parse(evAll):[];
+  }catch(e){events.ALL=[];}
 }
 function showSaveBadge(ok){
   const b=document.getElementById("save-badge");
   b.textContent=ok?"✓ 保存済み":"保存失敗";
   b.className="save-badge"+(ok?" saved":"");
+}
+
+/* ============================================================
+   イベントナレッジ機能
+   運動会・祭り・チラシ・競合オープン/閉店などのナレッジを
+   日付に紐づけて記録する。日次テーブルの「イベント」列から登録・編集する。
+============================================================ */
+const EVENT_CATEGORIES = [
+  {key:"leaflet",           label:"チラシ",     color:"#e53935"},
+  {key:"event",             label:"イベント",   color:"#fb8c00"},
+  {key:"renovation",        label:"新店改装",   color:"#8e24aa"},
+  {key:"competitor_open",   label:"競合店出店", color:"#f9a825"},
+  {key:"competitor_close",  label:"競合店閉店", color:"#757575"},
+  {key:"weather",           label:"天候",       color:"#1e88e5"},
+  {key:"other",             label:"その他",     color:"#43a047"},
+];
+function eventCategoryOf(key){
+  return EVENT_CATEGORIES.find(c=>c.key===key) || EVENT_CATEGORIES[EVENT_CATEGORIES.length-1];
+}
+/* 指定BU・指定日のイベントを、BU固有＋全BU共通の両方から集めて返す（各要素に _bucket を付与） */
+function eventsForDay(dept, d){
+  const own    = (events[dept]||[]).filter(e=>e.day===d).map(e=>({...e, _bucket:dept}));
+  const common = (events.ALL ||[]).filter(e=>e.day===d).map(e=>({...e, _bucket:"ALL"}));
+  return [...own, ...common];
+}
+/* 指定BUに関係するイベント（BU固有＋全BU共通）を groupId 単位でまとめた一覧を返す */
+function eventGroupsForDept(dept){
+  const all = [...(events[dept]||[]).map(e=>({...e,_bucket:dept})), ...(events.ALL||[]).map(e=>({...e,_bucket:"ALL"}))];
+  const groups = {};
+  all.forEach(e=>{
+    const key = e._bucket+"::"+e.groupId;
+    if(!groups[key]) groups[key]={groupId:e.groupId, bucket:e._bucket, category:e.category, text:e.text, scope:e.scope, days:[]};
+    groups[key].days.push(e.day);
+  });
+  return Object.values(groups).sort((a,b)=>Math.min(...a.days)-Math.min(...b.days));
+}
+/* 日次テーブルの「イベント」セルのHTML。登録済みならカテゴリ色のバッジ、未登録なら＋ボタン */
+function eventCellHtml(dept, d){
+  const evs = eventsForDay(dept, d);
+  if(evs.length===0){
+    return `<td style="text-align:center;cursor:pointer;color:#ccc;font-size:12px" onclick="openEventModal('${dept}',${d})" title="イベントを登録">＋</td>`;
+  }
+  const badges = evs.map(e=>{
+    const cat = eventCategoryOf(e.category);
+    const raw = e.text || cat.label;
+    const label = raw.length>6 ? raw.slice(0,6)+"…" : raw;
+    return `<span style="display:inline-block;background:${cat.color};color:#fff;border-radius:3px;padding:1px 4px;font-size:9px;margin:1px;white-space:nowrap">${label}</span>`;
+  }).join("");
+  return `<td style="cursor:pointer;padding:2px 3px;min-width:74px" onclick="openEventModal('${dept}',${d})">${badges}</td>`;
+}
+
+let eventModalState = null; /* {dept, day, editingGroupId, selectedCategory} */
+
+function openEventModal(dept, day){
+  eventModalState = {dept, day, editingGroupId:null, selectedCategory:EVENT_CATEGORIES[0].key};
+  renderEventModal();
+  document.getElementById("event-modal-overlay").style.display="flex";
+}
+function cancelEventEdit(){
+  const el=document.getElementById("event-modal-overlay");
+  if(el) el.style.display="none";
+  eventModalState=null;
+}
+function selectEventCategory(key){
+  if(!eventModalState) return;
+  eventModalState.selectedCategory = key;
+  renderEventModal();
+}
+function renderEventModal(){
+  if(!eventModalState) return;
+  const {dept, day, editingGroupId} = eventModalState;
+  let editing=null;
+  if(editingGroupId){
+    editing = eventGroupsForDept(dept).find(g=>g.bucket+"::"+g.groupId===editingGroupId);
+  }
+  const fromDay = editing ? Math.min(...editing.days) : day;
+  const toDay   = editing ? Math.max(...editing.days) : day;
+  const scope   = editing ? editing.bucket : "OWN";
+  const category = editing ? editing.category : (eventModalState.selectedCategory || EVENT_CATEGORIES[0].key);
+  const text = editing ? (editing.text||"") : (document.getElementById("event-text")?.value ?? "");
+  eventModalState.selectedCategory = category;
+
+  const dayOptsFrom = Array.from({length:31},(_,i)=>i+1).map(d=>`<option value="${d}"${d===fromDay?' selected':''}>${d}日</option>`).join("");
+  const dayOptsTo   = Array.from({length:31},(_,i)=>i+1).map(d=>`<option value="${d}"${d===toDay?' selected':''}>${d}日</option>`).join("");
+
+  const catButtons = EVENT_CATEGORIES.map(c=>`
+    <button type="button"
+      style="background:${c.key===category?c.color:'#fff'};color:${c.key===category?'#fff':c.color};border:1.5px solid ${c.color};border-radius:6px;padding:5px 10px;font-size:12px;margin:2px;cursor:pointer"
+      onclick="selectEventCategory('${c.key}')">${c.label}</button>`).join("");
+
+  const groupList = eventGroupsForDept(dept).map(g=>{
+    const cat = eventCategoryOf(g.category);
+    const dmin=Math.min(...g.days), dmax=Math.max(...g.days);
+    const period = dmin===dmax ? `${dmin}日` : `${dmin}〜${dmax}日`;
+    const scopeLabel = g.bucket==="ALL" ? "全BU共通" : "このBU";
+    const gkey = g.bucket+"::"+g.groupId;
+    return `<div style="display:flex;align-items:center;gap:6px;padding:6px 4px;border-bottom:1px solid #eee;font-size:12px;flex-wrap:wrap">
+      <span style="background:${cat.color};color:#fff;border-radius:3px;padding:1px 6px;font-size:10px">${cat.label}</span>
+      <span style="color:#888">${period}</span>
+      <span style="color:#aaa">${scopeLabel}</span>
+      <span style="flex:1;min-width:60px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${(g.text||"").replace(/</g,"&lt;")}</span>
+      <button class="btn-sm" style="font-size:11px" onclick="editEventGroup('${gkey}')">編集</button>
+      <button class="btn-sm" style="font-size:11px;color:#c62828" onclick="deleteEventGroup('${gkey}')">削除</button>
+    </div>`;
+  }).join("") || `<div style="color:#aaa;font-size:12px;padding:8px 0">このBUに登録されているイベントはありません</div>`;
+
+  const box=document.getElementById("event-modal-box");
+  if(!box) return;
+  box.innerHTML = `
+    <div style="font-weight:600;font-size:15px;margin-bottom:12px">📌 イベント登録（${dept}）</div>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap">
+      <span style="font-size:12px;color:#888">期間</span>
+      <select class="sm" id="event-from">${dayOptsFrom}</select>
+      <span style="font-size:12px;color:#888">〜</span>
+      <select class="sm" id="event-to">${dayOptsTo}</select>
+      <span style="font-size:12px;color:#888">日</span>
+    </div>
+    <div style="margin-bottom:10px">
+      <div style="font-size:12px;color:#888;margin-bottom:4px">カテゴリ</div>
+      <div>${catButtons}</div>
+    </div>
+    <div style="margin-bottom:10px">
+      <input type="text" id="event-text" value="${text.replace(/"/g,"&quot;")}" placeholder="内容（例：〇〇祭り、△△チラシ配布 など）" style="width:100%;font-size:12px;padding:6px 8px;border:0.5px solid #c0c0be;border-radius:5px">
+    </div>
+    <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#555;margin-bottom:14px">
+      <input type="checkbox" id="event-scope-all" ${scope==="ALL"?"checked":""}> 全BU共通（全${DEPTS.length}BUの日次テーブルに表示）
+    </label>
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn-sm" onclick="cancelEventEdit()">閉じる</button>
+      <button class="btn-sm" style="background:#1e3a5f;color:#fff" onclick="addEvent()">${editing?'更新':'登録'}</button>
+    </div>
+    <div style="margin-top:16px;border-top:1px solid #eee;padding-top:10px">
+      <div style="font-size:12px;color:#888;margin-bottom:4px">登録済みイベント一覧</div>
+      ${groupList}
+    </div>`;
+}
+/* 入力内容から新規登録／更新を行う。期間指定の場合は同じgroupIdで各日にイベントを作る */
+function addEvent(){
+  if(!eventModalState) return;
+  const {dept, editingGroupId} = eventModalState;
+  const from = parseInt(document.getElementById("event-from").value);
+  const to   = parseInt(document.getElementById("event-to").value);
+  const text = document.getElementById("event-text").value.trim();
+  const scopeAll = document.getElementById("event-scope-all").checked;
+  const category = eventModalState.selectedCategory || EVENT_CATEGORIES[0].key;
+  if(isNaN(from)||isNaN(to)||to<from){ showToast("開始日・終了日を正しく指定してください"); return; }
+
+  let groupId = editingGroupId ? editingGroupId.split("::")[1] : null;
+  if(editingGroupId){
+    removeEventGroup(editingGroupId, true);
+  }
+  if(!groupId) groupId = "ev_"+Date.now()+"_"+Math.random().toString(36).slice(2,7);
+  const bucketKey = scopeAll ? "ALL" : dept;
+  if(!events[bucketKey]) events[bucketKey]=[];
+  for(let d=from; d<=to; d++){
+    events[bucketKey].push({
+      id: "e_"+Date.now()+"_"+d+"_"+Math.random().toString(36).slice(2,5),
+      groupId, day:d, scope:scopeAll?"ALL":"OWN", text, color:eventCategoryOf(category).color, category
+    });
+  }
+  saveAll();
+  sbuSyncPushEventsBucket(bucketKey);
+  showToast(editingGroupId ? "イベントを更新しました" : "イベントを登録しました");
+  eventModalState.editingGroupId=null;
+  renderEventModal();
+  renderDeptTable(dept);
+}
+function editEventGroup(groupKey){
+  if(!eventModalState) return;
+  eventModalState.editingGroupId = groupKey;
+  renderEventModal();
+}
+/* groupKey（"bucket::groupId"形式）で指定したイベントグループを削除する */
+function removeEventGroup(groupKey, silent){
+  const [bucket, groupId] = groupKey.split("::");
+  if(events[bucket]){
+    events[bucket] = events[bucket].filter(e=>e.groupId!==groupId);
+    saveAll();
+    sbuSyncPushEventsBucket(bucket);
+  }
+  if(!silent){
+    showToast("イベントを削除しました");
+    if(eventModalState) renderEventModal();
+    if(eventModalState) renderDeptTable(eventModalState.dept);
+  }
+}
+function deleteEventGroup(groupKey){
+  if(!confirm("このイベントを削除しますか？")) return;
+  removeEventGroup(groupKey, false);
+}
+/* イベントデータをスプレッドシートへ同期送信する（BU固有 or 全BU共通のバケット単位） */
+function sbuSyncPushEventsBucket(bucketKey){
+  if(!sbuSyncEnabled || !sbuSyncUrl) return;
+  const m=getMonth();
+  const key = bucketKey==="ALL" ? `sbu2_ALL_${m}_events` : sk(bucketKey,"events",m);
+  sbuSyncPushKey(key, JSON.stringify(events[bucketKey]||[]));
 }
 function showToast(msg){
   const t=document.getElementById("toast");
@@ -3269,6 +3481,11 @@ const CHANGELOG = [
     date: "2026-07-06",
     author: "Claude",
     content: "ビューティ・ヘルスの7月度予算を、正式な店舗別Excel（7月度筑豊第一エリアヘルス_佐伯さん予算数値）の実データに置き換え。ビューティー＋ヘルスの2ライン合計（インバスアウトバスケアは含まない）を日別・店舗別に反映。全店合計は61,066千円（約6,107万円）となり、以前推定で調整した約6,100万円とほぼ一致。仮調整だった値を正式な実データに更新。"
+  },
+  {
+    date: "2026-07-06",
+    author: "Claude",
+    content: "「イベントナレッジ機能」を再実装。以前のセッションで実装済みだったが、その後の更新作業で失われていたため、いただいた仕様（登録・期間一括登録・カテゴリ7種・全BU共通/BU固有の切り替え・編集・削除・スプレッドシート同期）に基づき復元。日次テーブルに「イベント」列を追加し、セルをクリックするとモーダルで登録・編集・削除ができる。events[dept]（BU固有）とevents.ALL（全BU共通）で管理し、eventsForDay()で当日分を合算表示。saveAll/loadAllにも統合し、端末をまたいだ同期にも対応。"
   },
 ];
 
@@ -4625,10 +4842,12 @@ function renderDeptTable(dept){
   /* thead（全週共通） */
   let thead=`<tr><th style="min-width:28px">週</th><th class="lc" style="min-width:38px">日付</th><th style="min-width:20px">曜</th>`;
   if(weather) thead+=`<th style="min-width:60px">今年天気</th><th style="min-width:60px;color:#999">昨年天気</th>`;
+  thead+=`<th style="min-width:74px;color:#c62828">イベント</th>`;
   thead+=`<th colspan="${span}" class="sh sep" style="background:#1e3a5f">全店計</th>`;
   stores.forEach(s=>thead+=`<th colspan="${span}" class="sh sep">${s}店</th>`);
   thead+=`</tr><tr><th></th><th></th><th></th>`;
   if(weather) thead+=`<th></th><th></th>`;
+  thead+=`<th></th>`;
   const headCellsBlock=()=>{
     let h="", used=false;
     if(daily&&!weekly){ h+=`<th class="sep" style="color:#aaa;min-width:58px">日割予算</th>`; used=true; }
@@ -4675,6 +4894,7 @@ function renderDeptTable(dept){
           tbody+=weatherCellHtml(`2026-${pad2(m)}-${pad2(d)}`, false);
           tbody+=weatherCellHtml(`2025-${pad2(m)}-${pad2(d)}`, true);
         }
+        tbody+=eventCellHtml(dept, d);
         /* 全店計ブロック */
         {
           const dtb=deptSumB(dept,[d]), dta=deptSumA(dept,[d]), dtl=deptSumL(dept,[d]), dtp=deptSumP(dept,[d]);
@@ -4723,6 +4943,7 @@ function renderDeptTable(dept){
     /* 小計行 */
     tbody+=`<tr class="sub"><td></td><td class="lc" colspan="2">${getWeeks()[wi].label}　小計</td>`;
     if(weather) tbody+=`<td></td><td></td>`;
+    tbody+=`<td></td>`;
     {
       const dtb=deptSumB(dept,wd), dta=deptSumA(dept,wd), dtl=deptSumL(dept,wd), dtp=deptSumP(dept,wd);
       const dbase=dtp!=null?dtp:dtb;
