@@ -2022,13 +2022,30 @@ function onMonthChange(){
   initActuals();loadAll();fillDefaultLY();renderCurrent();
   lastSelectedMonth=getMonth();
 }
+let pendingRerender = false;
+/* テキスト入力欄・テキストエリアにフォーカスがある間（特に日本語IMEで変換中）に
+   自動同期(20秒おきのPull)や天気取得のコールバックがテーブル全体を再構築すると、
+   入力中の文字が消えたり、IMEの変換が中断されたりする不具合があったため、
+   入力中は再描画を保留し、フォーカスが外れたタイミングで実行し直すようにする */
 function renderCurrent(){
+  const ae = document.activeElement;
+  if(ae && (ae.tagName==="TEXTAREA" || ae.tagName==="INPUT")){
+    pendingRerender = true;
+    return;
+  }
+  pendingRerender = false;
   if(currentPage==="home") renderBuSelectGrid();
   else if(currentPage==="summary") renderSummary();
   else if(currentPage==="ranking") renderStoreRankings();
   else if(currentPage==="blocks") renderBlocksPage();
   else if(currentPage.startsWith("dept-")) renderDept(currentPage.replace("dept-",""));
 }
+document.addEventListener("focusout", (e)=>{
+  if(!pendingRerender) return;
+  if(e.target && (e.target.tagName==="TEXTAREA" || e.target.tagName==="INPUT")){
+    setTimeout(()=>{ if(pendingRerender) renderCurrent(); }, 0);
+  }
+});
 
 /* ============================================================
    予算データ取得
@@ -2688,12 +2705,28 @@ function updateCalcCells(dept){
   renderDeptTable(dept);
 }
 /* 日次テーブルの計画・実績入力欄での矢印キー／Enterキー操作をまとめて処理する。
-   ↑↓＝同じ店舗・同じ列で前日/翌日へ、←→＝同じ日・同じ列で前/次の店舗へ、
-   Enter＝↓と同じ（翌日へ）。まず値を保存（up2/ua）してテーブルを再描画させてから、
+   ↑↓＝同じ店舗・同じ列で前日/翌日へ、Enter＝↓と同じ（翌日へ）。
+   ←→は、数字の途中でカーソルだけ動かしたい場合を優先するため、
+   カーソルが入力欄の左端/右端にある時だけ前/次の店舗へ移動する（それ以外は通常のカーソル移動に任せる）。
+   移動時はまず値を保存（up2/ua）してテーブルを再描画させてから、
    再描画後のDOMから移動先の入力欄を探してフォーカスする（存在しなければ何もしない） */
 function gridKeydown(e, kind, dept, s, d){
   const key = e.key;
   if(key!=='Enter' && key!=='ArrowDown' && key!=='ArrowUp' && key!=='ArrowLeft' && key!=='ArrowRight') return;
+
+  if(key==='ArrowLeft' || key==='ArrowRight'){
+    /* type=numberはブラウザによってselectionStart/Endが取得できない（Firefox等）ため、
+       取得できない場合は隣セルへの移動を行わず、通常のカーソル移動のままにする（安全側） */
+    let atStart=false, atEnd=false;
+    try{
+      const val = e.target.value ?? "";
+      atStart = e.target.selectionStart===0 && e.target.selectionEnd===0;
+      atEnd   = e.target.selectionStart===val.length && e.target.selectionEnd===val.length;
+    }catch(err){ return; }
+    if(key==='ArrowLeft' && !atStart) return;
+    if(key==='ArrowRight' && !atEnd) return;
+  }
+
   e.preventDefault();
   const save = kind==='pi' ? up2 : ua;
   save(dept, s, d, e.target.value);
@@ -3574,6 +3607,16 @@ const CHANGELOG = [
     date: "2026-07-06",
     author: "Claude",
     content: "日次テーブルの「計画」「実績」入力欄に、矢印キーでの移動機能を追加。↓＝翌日、↑＝前日、→＝次の店舗、←＝前の店舗（同じ列・同じ種類のセルへ移動）、Enter＝↓と同じ動作。Excelのような感覚で連続入力できるように改善（gridKeydown関数に統一。以前のfocusNextDayInputは統合・削除）。"
+  },
+  {
+    date: "2026-07-06",
+    author: "Claude",
+    content: "矢印キー移動機能を追加した際、数字を入力している途中で←→キーを押すとカーソル移動のつもりが即座に隣の店舗セルへ移動してしまい、入力途中の値のまま保存されて「入力した文字が消える」ように見える不具合を修正。←→キーは、カーソルが入力欄の左端/右端にある時だけ隣のセルへ移動するように変更し、数字の途中では通常のカーソル移動を優先するようにした。"
+  },
+  {
+    date: "2026-07-06",
+    author: "Claude",
+    content: "週次PDCA欄（作戦・目標／振り返り・来週対策）や実績・計画の入力中に、20秒おきの自動同期（スプレッドシートPull）や天気データ取得の完了コールバックがテーブル全体を再構築してしまい、入力中の文字が消えたり日本語入力（IME変換）が中断されたりする不具合を修正。テキスト入力欄・テキストエリアにフォーカスがある間は再描画を保留し、フォーカスが外れたタイミングで保留していた再描画を実行するようにした（renderCurrent関数を変更）。"
   },
 ];
 
