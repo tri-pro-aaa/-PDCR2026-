@@ -916,9 +916,13 @@ input.pi:focus{outline:none;border-color:#9c27b0;background:#fff}
         <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
           <span style="font-size:12px;color:#666">選択したBU・月のデータをリセット：</span>
           <select id="reset-dept" class="sm">
+            <option value="" selected>▼ BUを選択してください</option>
             <option value="ALL">全BU</option>
           </select>
           <button class="btn btn-red" onclick="confirmReset()">🗑 データリセット</button>
+          <div style="font-size:11px;color:#c62828;width:100%;margin-top:4px">
+            ⚠ リセットすると実績・計画・週次コメントが削除され、同期がONの場合はスプレッドシート側も空の状態で上書きされます。元に戻せません。
+          </div>
         </div>
       </div>
     </div>
@@ -2595,7 +2599,15 @@ function showToast(msg){
 }
 function confirmReset(){
   const d=document.getElementById("reset-dept").value;
-  if(!confirm(`${d==="ALL"?"全BU":d} の入力データを削除します。よろしいですか？`)) return;
+  if(!d){ showToast("リセットするBUを選択してください"); return; }
+  if(d==="ALL"){
+    /* 全BU削除は影響が非常に大きいため、単純なOK/キャンセルだけでなく
+       「全BU削除」という文字列の入力を要求する（誤操作防止の二重確認） */
+    const typed = prompt(`全BU（${DEPTS.length}件）の実績・計画・週次コメントを削除し、同期がONの場合はスプレッドシート側も空の状態で上書きします。この操作は元に戻せません。\n\n本当に実行する場合は「全BU削除」と入力してください。`);
+    if(typed !== "全BU削除"){ showToast("入力内容が一致しなかったため、リセットを中止しました"); return; }
+  } else {
+    if(!confirm(`${d} の実績・計画・週次コメントを削除します。同期がONの場合はスプレッドシート側も空の状態で上書きされます。元に戻せません。よろしいですか？`)) return;
+  }
   const targets=d==="ALL"?DEPTS:[d];
   targets.forEach(dept=>{
     ["actuals","plans","plan_txt","action_txt"].forEach(k=>localStorage.removeItem(sk(dept,k)));
@@ -2604,6 +2616,7 @@ function confirmReset(){
     sbuSyncPushDept(dept);
   });
   showToast("リセットしました");
+  document.getElementById("reset-dept").value="";
   renderCurrent();
 }
 
@@ -3213,9 +3226,9 @@ function parseRows(rows,fname,uploadDept){
    UI更新
 ============================================================ */
 function updateUISelects(){
-  /* 操作ページのリセットセレクト */
+  /* 操作ページのリセットセレクト（誤操作防止のため、デフォルトは未選択にする） */
   const rs=document.getElementById("reset-dept");
-  rs.innerHTML=`<option value="ALL">全BU</option>`;
+  rs.innerHTML=`<option value="" selected>▼ BUを選択してください</option><option value="ALL">全BU</option>`;
   DEPTS.forEach(d=>rs.innerHTML+=`<option value="${d}">${d}</option>`);
   /* CSVボタン */
   const cb=document.getElementById("csv-btns");
@@ -3617,6 +3630,11 @@ const CHANGELOG = [
     date: "2026-07-06",
     author: "Claude",
     content: "週次PDCA欄（作戦・目標／振り返り・来週対策）や実績・計画の入力中に、20秒おきの自動同期（スプレッドシートPull）や天気データ取得の完了コールバックがテーブル全体を再構築してしまい、入力中の文字が消えたり日本語入力（IME変換）が中断されたりする不具合を修正。テキスト入力欄・テキストエリアにフォーカスがある間は再描画を保留し、フォーカスが外れたタイミングで保留していた再描画を実行するようにした（renderCurrent関数を変更）。"
+  },
+  {
+    date: "2026-07-06",
+    author: "Claude",
+    content: "設定タブの「データリセット」機能が、プルダウンのデフォルトが「全BU」になっており、確認ダイアログでOKを押すだけで全17BUの実績・計画・週次コメントが削除され、同期がONの場合はスプレッドシート側も即座に空データで上書きされる危険な仕様だった（実際にホールセールパン・加工肉の実績データが空の状態でスプレッドシートに上書きされていたことを確認）。デフォルトを「未選択」に変更して誤操作を防止し、「全BU」を選んだ場合は「全BU削除」という文字列の入力を要求する二重確認を追加。個別BUの削除時も、スプレッドシートが上書きされる旨・元に戻せない旨を確認ダイアログに明記するよう強化。"
   },
 ];
 
