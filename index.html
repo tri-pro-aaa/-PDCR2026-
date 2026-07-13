@@ -3682,6 +3682,11 @@ const CHANGELOG = [
     author: "Claude",
     content: "上記の修正後も、フローズンが一瞬反映されてすぐ元に戻る不具合が発生。原因は起動処理の順序で、seedActualDataによるスプレッドシートへの送信（Push、フォーム送信のため非同期でサーバー到達に時間がかかる）が完了する前に、直後に呼ばれるsbuSyncInit()内の初回Pullが即座に実行され、まだ更新されていない古いスプレッドシートのデータでシードしたばかりの正しいローカルデータを上書きしてしまっていた。sbuSyncStart()内の初回Pullを5秒遅延させ、Pushがサーバーに届く猶予を確保するよう修正（20秒おきの定期Pullはこれまで通り）。"
   },
+  {
+    date: "2026-07-06",
+    author: "Claude",
+    content: "上記の修正後も、フローズンのスプレッドシートデータが再び空になる事象が発生（複数端末・複数タイミングでの同期が絡み、個別の原因切り分けが難しくなったため）。ACTUALS_SEED_VERSIONを9に更新し、対象5BU（ホールセールパン・加工肉・フローズン・洋日配・和日配）について、どの端末でページを開いてもExcelの正しい実績データで強制的に再送信されるようにした。"
+  },
 ];
 
 function renderChangelog(){
@@ -5386,7 +5391,7 @@ const UPLOADED_ACTUALS_7 = {"ホールセールパン":{"上津役":{"1":{"val":
    まだ実績が入力されていない日にだけ投入する（他の人が既に入力した実績を上書きしないよう安全策）。
    バージョンを上げることで、過去の誤った投入データもこの処理で修正される。 */
 (function seedActualData(){
-  const ACTUALS_SEED_VERSION = "8"; /* データ修正のたびに番号を上げる */
+  const ACTUALS_SEED_VERSION = "9"; /* データ修正のたびに番号を上げる */
   const savedSeed = localStorage.getItem("sbu2_actuals_seed_version");
   if(savedSeed === ACTUALS_SEED_VERSION) return;
   const m=getMonth();
