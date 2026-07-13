@@ -2971,6 +2971,7 @@ function parseActualCSV(text, fname){
   }
 
   let count=0, skipCount=0;
+  const updatedBUs = new Set(); /* 今回のアップロードで実際にデータが更新されたBU一覧(同期送信用) */
   lines.slice(1).forEach(line=>{
     const cols=line.split(",").map(c=>c.trim().replace(/"/g,""));
     const dateStr=cols[dateIdx]||"";
@@ -3001,6 +3002,7 @@ function parseActualCSV(text, fname){
     /* 部門名単位の行が同一BU・店舗・日に複数存在する場合は合算する */
     const prevVal=actuals[bu][store][day]?actuals[bu][store][day].val:0;
     actuals[bu][store][day]={val:prevVal+valThousand, isLY:false};
+    updatedBUs.add(bu);
     count++;
   });
 
@@ -3010,6 +3012,10 @@ function parseActualCSV(text, fname){
   }
 
   saveAll();
+  /* 取り込んだBUをスプレッドシートへも送信する（同期がONの場合）。
+     これをしないと、ローカルには正しく保存されても、次の自動同期(Pull)で
+     まだ更新されていないスプレッドシート側の古いデータに上書きされてしまう */
+  updatedBUs.forEach(bu=>{ if(typeof sbuSyncPushDept==="function") sbuSyncPushDept(bu); });
   const lbl=document.getElementById("actual-upload-status");
   if(lbl) lbl.textContent=`✓ ${fname}（${count}件を読み込み、${skipCount}件スキップ）`;
   lbl && (lbl.style.color="#2e7d32");
@@ -3686,6 +3692,11 @@ const CHANGELOG = [
     date: "2026-07-06",
     author: "Claude",
     content: "上記の修正後も、フローズンのスプレッドシートデータが再び空になる事象が発生（複数端末・複数タイミングでの同期が絡み、個別の原因切り分けが難しくなったため）。ACTUALS_SEED_VERSIONを9に更新し、対象5BU（ホールセールパン・加工肉・フローズン・洋日配・和日配）について、どの端末でページを開いてもExcelの正しい実績データで強制的に再送信されるようにした。"
+  },
+  {
+    date: "2026-07-06",
+    author: "Claude",
+    content: "実績アップロード機能（CSVドラッグ&ドロップ）で「〇件読み込みました」と表示されるにもかかわらず数字が反映されない不具合を修正。原因はparseActualCSV関数がローカル保存（saveAll）のみ行い、スプレッドシートへの同期送信（sbuSyncPushDept）を一切呼んでいなかったため、その場では正しく見えても次の自動同期（Pull）でスプレッドシート側の古いデータに巻き戻されていた。読み込み時に実際に更新されたBUを記録し、保存後にそれぞれ同期送信するよう修正。シミュレーションで送信されることを確認。"
   },
 ];
 
