@@ -3667,6 +3667,11 @@ const CHANGELOG = [
     author: "Claude",
     content: "フローズン・洋日配・和日配で、ローカルに既に一部日数（9日分）の実績が残っていたため「未入力日のみ追加」方式では12日分のうち9日分しか反映されなかった不具合を修正。7月の投入方式を、UPLOADED_ACTUALS_7の対象日は既存値の有無に関わらず必ず上書きする方式に変更（ACTUALS_SEED_VERSIONを7に更新し、再投入されるようにした）。シミュレーションで9日分→12日分に正しく反映されることを確認。"
   },
+  {
+    date: "2026-07-06",
+    author: "Claude",
+    content: "上記の修正後も、ホールセールパン・和日配・洋日配だけ日数が9日分に戻ってしまう不具合が発生。原因は、seedActualDataがローカルのactualsを上書きするだけでスプレッドシートへ同期送信しておらず、20秒おきの自動同期（Pull）で、スプレッドシート側に残っていた古い9日分のデータにローカルの12日分が巻き戻されていたため。シード処理の最後に対象BUをsbuSyncPushDept()で明示的に送信するよう修正し、ACTUALS_SEED_VERSIONを8に更新（既にバージョン7でシード済みの端末でも再投入・再送信されるようにした）。シミュレーションでスプレッドシートへの送信も含めて動作確認済み。"
+  },
 ];
 
 function renderChangelog(){
@@ -5371,7 +5376,7 @@ const UPLOADED_ACTUALS_7 = {"ホールセールパン":{"上津役":{"1":{"val":
    まだ実績が入力されていない日にだけ投入する（他の人が既に入力した実績を上書きしないよう安全策）。
    バージョンを上げることで、過去の誤った投入データもこの処理で修正される。 */
 (function seedActualData(){
-  const ACTUALS_SEED_VERSION = "7"; /* データ修正のたびに番号を上げる */
+  const ACTUALS_SEED_VERSION = "8"; /* データ修正のたびに番号を上げる */
   const savedSeed = localStorage.getItem("sbu2_actuals_seed_version");
   if(savedSeed === ACTUALS_SEED_VERSION) return;
   const m=getMonth();
@@ -5399,19 +5404,25 @@ const UPLOADED_ACTUALS_7 = {"ホールセールパン":{"上津役":{"1":{"val":
   } else if(m === 7){
     /* Excelの実績データ(12日分)を正として、対象BU・対象日は必ず上書きする。
        以前の「未入力の日だけ追加」方式だと、既にローカルに一部日数の実績が
-       残っていた場合にそこがスキップされ、12日分のうち一部しか反映されない問題があった */
+       残っていた場合にそこがスキップされ、12日分のうち一部しか反映されない問題があった。
+       さらに、ここでローカルを上書きしても、スプレッドシートへ同期送信しないと、
+       次の自動同期(Pull)でスプレッドシート側の古い（日数が少ない）データに
+       巻き戻されてしまうため、対象BUはシード後に明示的にPushする */
     DEPTS.forEach(dept=>{
       const seedData = UPLOADED_ACTUALS_7[dept];
       if(!seedData) return;
+      let deptSeeded=false;
       stores.forEach(s=>{
         if(seedData[s]){
           if(!actuals[dept][s]) actuals[dept][s]={};
           Object.entries(seedData[s]).forEach(([day,v])=>{
             actuals[dept][s][day] = v;
             seeded=true;
+            deptSeeded=true;
           });
         }
       });
+      if(deptSeeded && typeof sbuSyncPushDept==="function") sbuSyncPushDept(dept);
     });
   } else {
     localStorage.setItem("sbu2_actuals_seed_version", ACTUALS_SEED_VERSION); return;
