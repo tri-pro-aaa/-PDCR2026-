@@ -2206,7 +2206,12 @@ function sbuSyncUpdateToggleBtn(){
 }
 function sbuSyncStart(){
   sbuSyncStop();
-  sbuSyncPullAll();
+  /* ページ読み込み直後は、seedActualData等によるスプレッドシートへの送信(Push)が
+     フォーム送信（非同期）のためまだサーバーに届いていない可能性がある。
+     その状態で即座にPullすると、まだ更新されていない古いスプレッドシートのデータで
+     シードしたばかりの正しいローカルデータを上書きしてしまうため、初回のPullだけ
+     少し待ってから実行する（20秒おきの定期実行はこれまで通り） */
+  setTimeout(()=>sbuSyncPullAll(), 5000);
   sbuSyncTimer = setInterval(()=>sbuSyncPullAll(), 20000);
 }
 function sbuSyncStop(){
@@ -3671,6 +3676,11 @@ const CHANGELOG = [
     date: "2026-07-06",
     author: "Claude",
     content: "上記の修正後も、ホールセールパン・和日配・洋日配だけ日数が9日分に戻ってしまう不具合が発生。原因は、seedActualDataがローカルのactualsを上書きするだけでスプレッドシートへ同期送信しておらず、20秒おきの自動同期（Pull）で、スプレッドシート側に残っていた古い9日分のデータにローカルの12日分が巻き戻されていたため。シード処理の最後に対象BUをsbuSyncPushDept()で明示的に送信するよう修正し、ACTUALS_SEED_VERSIONを8に更新（既にバージョン7でシード済みの端末でも再投入・再送信されるようにした）。シミュレーションでスプレッドシートへの送信も含めて動作確認済み。"
+  },
+  {
+    date: "2026-07-06",
+    author: "Claude",
+    content: "上記の修正後も、フローズンが一瞬反映されてすぐ元に戻る不具合が発生。原因は起動処理の順序で、seedActualDataによるスプレッドシートへの送信（Push、フォーム送信のため非同期でサーバー到達に時間がかかる）が完了する前に、直後に呼ばれるsbuSyncInit()内の初回Pullが即座に実行され、まだ更新されていない古いスプレッドシートのデータでシードしたばかりの正しいローカルデータを上書きしてしまっていた。sbuSyncStart()内の初回Pullを5秒遅延させ、Pushがサーバーに届く猶予を確保するよう修正（20秒おきの定期Pullはこれまで通り）。"
   },
 ];
 
