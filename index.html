@@ -4562,6 +4562,19 @@ function renderSummary(){
   const planDiff   = tc ? ta-planBase : null;
   const lyDiff     = tc ? ta-tl : null;
 
+  /* 計画予算比・計画昨対比（全BU合算）：実績の有無に関係ない指標なので、
+     進捗日数ではなく月全体(allD)・全BU・全店舗で計算する */
+  let ftb=0,ftp=0,ftl=0;
+  DEPTS.forEach(dept=>{
+    stores.forEach(s=>{
+      ftb+=sumB(dept,s,allD);
+      ftp+=sumP(dept,s,allD)||0;
+      ftl+=sumL(dept,s,allD);
+    });
+  });
+  const pbr  = ftp&&ftb?ftp/ftb:null;  /* 計画予算比（全BU合算） */
+  const plyr = ftp&&ftl?ftp/ftl:null;  /* 計画昨対比（全BU合算） */
+
   document.getElementById("sum-kpi").innerHTML=`
     <div class="kpi"><div class="kpi-label">予算（全BU合算・進捗分）</div><div class="kpi-val">${f(tb)}</div><div class="kpi-sub">${DEPTS.length}BU ${stores.length}店舗</div></div>
     <div class="kpi"><div class="kpi-label">累積実績</div><div class="kpi-val ${rc(r)}">${f(tc?ta:null)}</div><div class="kpi-sub">${progressLabel}</div></div>
@@ -4570,7 +4583,15 @@ function renderSummary(){
     <div class="kpi"><div class="kpi-label">計画比</div><div class="kpi-val ${rc(rp)}">${fr(rp)}</div>
       <div class="kpi-sub">${planDiff!=null?`差額 <span class="${dc(planDiff)}">${fd(planDiff)}</span>`:""}</div></div>
     <div class="kpi"><div class="kpi-label">昨対比</div><div class="kpi-val ${rc(lr)}">${fr(lr)}</div>
-      <div class="kpi-sub">${lyDiff!=null?`差額 <span class="${dc(lyDiff)}">${fd(lyDiff)}</span>`:""}</div></div>`;
+      <div class="kpi-sub">${lyDiff!=null?`差額 <span class="${dc(lyDiff)}">${fd(lyDiff)}</span>`:""}</div></div>
+    <div class="kpi" style="background:#eef3f7;border:0.5px solid #cfdce6;border-left:3px solid #3a6a8a;border-radius:0 10px 10px 0">
+      <div class="kpi-label" style="color:#2a5a7a">計画予算比</div>
+      <div class="kpi-val ${rc(pbr)}" style="${pbr==null?'color:#aaa':''}">${ftp?fr(pbr):'—'}</div>
+      <div class="kpi-sub" style="color:#5a8aa8">全BU計画÷予算</div></div>
+    <div class="kpi" style="background:#eef3f7;border:0.5px solid #cfdce6;border-left:3px solid #3a6a8a;border-radius:0 10px 10px 0">
+      <div class="kpi-label" style="color:#2a5a7a">計画昨対比</div>
+      <div class="kpi-val ${rc(plyr)}" style="${plyr==null?'color:#aaa':''}">${ftp?fr(plyr):'—'}</div>
+      <div class="kpi-sub" style="color:#5a8aa8">全BU計画÷昨年実績</div></div>`;
 
   /* BUカード */
   document.getElementById("sum-dept-cards").innerHTML=DEPTS.map(dept=>{
@@ -5065,12 +5086,14 @@ function renderDeptKPI(dept){
     <div class="kpi"><div class="kpi-label">昨年比</div>
       <div class="kpi-val ${rc(lr)}">${hasUpload?fr(lr):'—'}</div>
       <div class="kpi-sub">対昨年実績</div></div>
-    <div class="kpi"><div class="kpi-label" style="color:#6a1b9a">計画予算比</div>
+    <div class="kpi" style="background:#eef3f7;border:0.5px solid #cfdce6;border-left:3px solid #3a6a8a;border-radius:0 10px 10px 0">
+      <div class="kpi-label" style="color:#2a5a7a">計画予算比</div>
       <div class="kpi-val ${rc(pbr)}" style="${pbr==null?'color:#aaa':''}">${tp?fr(pbr):'—'}</div>
-      <div class="kpi-sub">計画÷予算</div></div>
-    <div class="kpi"><div class="kpi-label" style="color:#6a1b9a">計画昨対比</div>
+      <div class="kpi-sub" style="color:#5a8aa8">計画÷予算</div></div>
+    <div class="kpi" style="background:#eef3f7;border:0.5px solid #cfdce6;border-left:3px solid #3a6a8a;border-radius:0 10px 10px 0">
+      <div class="kpi-label" style="color:#2a5a7a">計画昨対比</div>
       <div class="kpi-val ${rc(plyr)}" style="${plyr==null?'color:#aaa':''}">${tp?fr(plyr):'—'}</div>
-      <div class="kpi-sub">計画÷昨年実績</div></div>`;
+      <div class="kpi-sub" style="color:#5a8aa8">計画÷昨年実績</div></div>`;
   const lbl=document.getElementById(`dept-month-lbl-${dept}`);
   if(lbl) lbl.textContent=`2026年${m}月`;
 }
