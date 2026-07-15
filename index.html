@@ -2176,6 +2176,14 @@ let sbuSyncUrl = localStorage.getItem("sbu2_sync_url") || "";
 let sbuSyncEnabled = localStorage.getItem("sbu2_sync_enabled") === "1";
 let sbuSyncTimer = null;
 let sbuSyncPulling = false;
+/* Push直後は該当keyをこのMapに「ガード期限（ミリ秒）」で記録する。
+   Push（フォーム送信）はサーバー到達の完了確認ができないため、
+   ガード期限内にPullが返ってきても、そのkeyだけはサーバー側の値で
+   ローカルを上書きしない（＝ローカルの新しい値を優先する）。
+   これにより「Pushがサーバーに届く前にPullが古い値で上書きしてしまう」
+   という、修正履歴で繰り返し発生していた競合を防ぐ。 */
+const SBU_SYNC_PUSH_GUARD_MS = 10000;
+let sbuSyncPendingPush = new Map(); // key -> ガード期限(ms, Date.now()基準)
 
 function sbuSyncSetStatus(msg){
   const el = document.getElementById("sbu-sync-status");
@@ -2226,6 +2234,9 @@ function sbuSyncStop(){
    そのため呼び出しごとに新しいフォーム／iframeを作り、送信後に破棄する方式に変更した） */
 function sbuSyncPushKey(key, jsonStr){
   if(!sbuSyncEnabled || !sbuSyncUrl) return;
+  /* このkeyをガード対象として記録。ガード期限が切れるまでは、
+     Pullで取得したサーバー側の値が古くてもローカルを上書きしない */
+  sbuSyncPendingPush.set(key, Date.now() + SBU_SYNC_PUSH_GUARD_MS);
   try{
     const uid = "sbuSyncFrame_" + Date.now() + "_" + Math.random().toString(36).slice(2,8);
     const frame = document.createElement("iframe");
@@ -2318,8 +2329,16 @@ function sbuSyncPullAll(manual){
     sbuSyncPulling = false;
     cleanup(scriptEl);
     if(!res || !res.ok || !res.data){ sbuSyncSetStatus("⚠ 取得に失敗しました"); return; }
-    let changed = 0;
+    let changed = 0, guarded = 0;
+    const now = Date.now();
     Object.keys(res.data).forEach(key=>{
+      /* Push直後でガード期限内のkeyは、サーバー側がまだ古い値のままの
+         可能性があるため、Pullでの上書きをスキップしてローカルを優先する */
+      const guardUntil = sbuSyncPendingPush.get(key);
+      if(guardUntil){
+        if(guardUntil > now){ guarded++; return; }
+        sbuSyncPendingPush.delete(key);
+      }
       const remote = res.data[key];
       const localJson = localStorage.getItem(key);
       if(localJson !== remote.json){
@@ -2327,7 +2346,7 @@ function sbuSyncPullAll(manual){
         changed++;
       }
     });
-    sbuSyncSetStatus(`最終同期：${new Date().toLocaleTimeString()}（${changed}件更新）`);
+    sbuSyncSetStatus(`最終同期：${new Date().toLocaleTimeString()}（${changed}件更新${guarded?`／${guarded}件は送信直後のためスキップ`:""}）`);
     if(changed>0){
       loadAll();
       fillDefaultLY();
