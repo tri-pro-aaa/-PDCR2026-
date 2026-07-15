@@ -2014,11 +2014,11 @@ function weatherFetchForecast(){
     }
   }).catch(()=>{});
 }
-function weatherCellHtml(iso, muted){
+function weatherCellHtml(iso, muted, stickyStyle=""){
   const w = weatherGet(iso);
-  if(!w) return `<td style="text-align:center;font-size:11px;color:var(--text-muted,#bbb)">—</td>`;
+  if(!w) return `<td style="text-align:center;font-size:11px;color:var(--text-muted,#bbb);${stickyStyle}">—</td>`;
   const color = muted ? "color:#999;" : "";
-  return `<td style="text-align:center;font-size:11px;white-space:nowrap;${color}">${weatherIcon(w.code)} ${Math.round(w.tmax)}/${Math.round(w.tmin)}</td>`;
+  return `<td style="text-align:center;font-size:11px;white-space:nowrap;${color}${stickyStyle}">${weatherIcon(w.code)} ${Math.round(w.tmax)}/${Math.round(w.tmin)}</td>`;
 }
 
 let lastSelectedMonth=null;
@@ -2515,10 +2515,10 @@ function eventGroupsForDept(dept){
   return Object.values(groups).sort((a,b)=>Math.min(...a.days)-Math.min(...b.days));
 }
 /* 日次テーブルの「イベント」セルのHTML。登録済みならカテゴリ色のバッジ、未登録なら＋ボタン */
-function eventCellHtml(dept, d){
+function eventCellHtml(dept, d, stickyStyle=""){
   const evs = eventsForDay(dept, d);
   if(evs.length===0){
-    return `<td style="text-align:center;cursor:pointer;color:#ccc;font-size:12px" onclick="openEventModal('${dept}',${d})" title="イベントを登録">＋</td>`;
+    return `<td style="text-align:center;cursor:pointer;color:#ccc;font-size:12px;${stickyStyle}" onclick="openEventModal('${dept}',${d})" title="イベントを登録">＋</td>`;
   }
   const badges = evs.map(e=>{
     const cat = eventCategoryOf(e.category);
@@ -2526,7 +2526,7 @@ function eventCellHtml(dept, d){
     const label = raw.length>6 ? raw.slice(0,6)+"…" : raw;
     return `<span style="display:inline-block;background:${cat.color};color:#fff;border-radius:3px;padding:1px 4px;font-size:9px;margin:1px;white-space:nowrap">${label}</span>`;
   }).join("");
-  return `<td style="cursor:pointer;padding:2px 3px;min-width:74px" onclick="openEventModal('${dept}',${d})">${badges}</td>`;
+  return `<td style="cursor:pointer;padding:2px 3px;min-width:74px;${stickyStyle}" onclick="openEventModal('${dept}',${d})">${badges}</td>`;
 }
 
 let eventModalState = null; /* {dept, day, editingGroupId, selectedCategory} */
@@ -5199,15 +5199,23 @@ function renderDeptTable(dept){
     weatherFetchForecast();
   }
 
+  /* 横スクロール時に固定表示する左端列（週・日付・曜・天気×2・イベント）の
+     幅とleftオフセットを算出。ヘッダー行・日別行・小計行すべてで同じ値を使う */
+  const stkW = weather ? [28,38,20,60,60,74] : [28,38,20,74];
+  const stkLeft = (()=>{ const arr=[]; let acc=0; stkW.forEach(w=>{arr.push(acc);acc+=w;}); return arr; })();
+  const evtIdx = stkW.length-1; /* イベント列のインデックス（天気ON/OFFで位置が変わる） */
+  const stkH = (i,extra="") => `position:sticky;left:${stkLeft[i]}px;width:${stkW[i]}px;min-width:${stkW[i]}px;z-index:6;${extra}`;
+  const stk  = (i,bg,extra="") => `position:sticky;left:${stkLeft[i]}px;width:${stkW[i]}px;min-width:${stkW[i]}px;z-index:3;background:${bg};${extra}`;
+
   /* thead（全週共通） */
-  let thead=`<tr><th style="min-width:28px">週</th><th class="lc" style="min-width:38px">日付</th><th style="min-width:20px">曜</th>`;
-  if(weather) thead+=`<th style="min-width:60px">今年天気</th><th style="min-width:60px;color:#999">昨年天気</th>`;
-  thead+=`<th style="min-width:74px;color:#c62828">イベント</th>`;
+  let thead=`<tr><th style="${stkH(0)}">週</th><th class="lc" style="${stkH(1)}">日付</th><th style="${stkH(2)}">曜</th>`;
+  if(weather) thead+=`<th style="${stkH(3)}">今年天気</th><th style="${stkH(4,'color:#999')}">昨年天気</th>`;
+  thead+=`<th style="${stkH(evtIdx,'color:#c62828')}">イベント</th>`;
   thead+=`<th colspan="${span}" class="sh sep" style="background:#1e3a5f">全店計</th>`;
   stores.forEach(s=>thead+=`<th colspan="${span}" class="sh sep">${s}店</th>`);
-  thead+=`</tr><tr><th></th><th></th><th></th>`;
-  if(weather) thead+=`<th></th><th></th>`;
-  thead+=`<th></th>`;
+  thead+=`</tr><tr><th style="${stkH(0)}"></th><th style="${stkH(1)}"></th><th style="${stkH(2)}"></th>`;
+  if(weather) thead+=`<th style="${stkH(3)}"></th><th style="${stkH(4)}"></th>`;
+  thead+=`<th style="${stkH(evtIdx)}"></th>`;
   const headCellsBlock=()=>{
     let h="", used=false;
     if(daily&&!weekly){ h+=`<th class="sep" style="color:#aaa;min-width:58px">日割予算</th>`; used=true; }
@@ -5248,13 +5256,14 @@ function renderDeptTable(dept){
       wd.forEach((d,di)=>{
         const dow=new Date(2026,m-1,d).getDay();
         const cls=dow===0?"sun":dow===6?"sat":"";
-        tbody+=`<tr class="${cls}"><td class="cc" style="font-size:10px;color:#aaa">${di===0?getWeeks()[wi].label:""}</td>
-          <td class="lc">${m}/${d}</td><td class="cc">${DOW[dow]}</td>`;
+        const rowBg=dow===0?"#fff3e0":dow===6?"#e8f5e9":"#fff";
+        tbody+=`<tr class="${cls}"><td class="cc" style="${stk(0,rowBg,'font-size:10px;color:#aaa')}">${di===0?getWeeks()[wi].label:""}</td>
+          <td class="lc" style="${stk(1,rowBg)}">${m}/${d}</td><td class="cc" style="${stk(2,rowBg)}">${DOW[dow]}</td>`;
         if(weather){
-          tbody+=weatherCellHtml(`2026-${pad2(m)}-${pad2(d)}`, false);
-          tbody+=weatherCellHtml(`2025-${pad2(m)}-${pad2(d)}`, true);
+          tbody+=weatherCellHtml(`2026-${pad2(m)}-${pad2(d)}`, false, stk(3,rowBg));
+          tbody+=weatherCellHtml(`2025-${pad2(m)}-${pad2(d)}`, true, stk(4,rowBg));
         }
-        tbody+=eventCellHtml(dept, d);
+        tbody+=eventCellHtml(dept, d, stk(evtIdx,rowBg));
         /* 全店計ブロック */
         {
           const dtb=deptSumB(dept,[d]), dta=deptSumA(dept,[d]), dtl=deptSumL(dept,[d]), dtp=deptSumP(dept,[d]);
@@ -5301,9 +5310,9 @@ function renderDeptTable(dept){
     }
 
     /* 小計行 */
-    tbody+=`<tr class="sub"><td></td><td class="lc" colspan="2">${getWeeks()[wi].label}　小計</td>`;
-    if(weather) tbody+=`<td></td><td></td>`;
-    tbody+=`<td></td>`;
+    tbody+=`<tr class="sub"><td style="${stk(0,'#f5f5f3')}"></td><td class="lc" colspan="2" style="position:sticky;left:${stkLeft[1]}px;width:${stkW[1]+stkW[2]}px;min-width:${stkW[1]+stkW[2]}px;z-index:3;background:#f5f5f3">${getWeeks()[wi].label}　小計</td>`;
+    if(weather) tbody+=`<td style="${stk(3,'#f5f5f3')}"></td><td style="${stk(4,'#f5f5f3')}"></td>`;
+    tbody+=`<td style="${stk(evtIdx,'#f5f5f3')}"></td>`;
     {
       const dtb=deptSumB(dept,wd), dta=deptSumA(dept,wd), dtl=deptSumL(dept,wd), dtp=deptSumP(dept,wd);
       const dbase=dtp!=null?dtp:dtb;
