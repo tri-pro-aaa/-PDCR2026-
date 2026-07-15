@@ -2276,6 +2276,64 @@ function sbuSyncPushDept(dept, month){
   sbuSyncPushKey(sk(dept,"actuals",m), localStorage.getItem(sk(dept,"actuals",m)) || "{}");
   sbuSyncPushKey(sk(dept,"plans",m),   localStorage.getItem(sk(dept,"plans",m))   || "{}");
 }
+/* getAllを1回だけ取得してPromiseで返す（sbuSyncPullAllとは別に、
+   ローカルの状態やUIには一切触れず「結果を返すだけ」の軽量版） */
+function sbuSyncFetchFresh(){
+  return new Promise(resolve=>{
+    if(!sbuSyncUrl){ resolve(null); return; }
+    const cbName = "sbuSyncFetchCb_" + Date.now() + "_" + Math.random().toString(36).slice(2,8);
+    let finished = false;
+    const cleanup = (scriptEl)=>{ delete window[cbName]; if(scriptEl && scriptEl.parentNode) scriptEl.parentNode.removeChild(scriptEl); };
+    const timeoutId = setTimeout(()=>{
+      if(finished) return; finished = true; resolve(null); cleanup(scriptEl);
+    }, 8000);
+    window[cbName] = function(res){
+      if(finished) return; finished = true;
+      clearTimeout(timeoutId); cleanup(scriptEl);
+      resolve(res && res.ok && res.data ? res.data : null);
+    };
+    const scriptEl = document.createElement("script");
+    scriptEl.src = sbuSyncUrl + "?action=getAll&callback=" + cbName;
+    scriptEl.onerror = ()=>{
+      if(finished) return; finished = true; clearTimeout(timeoutId); resolve(null); cleanup(scriptEl);
+    };
+    document.head.appendChild(scriptEl);
+  });
+}
+/* 実績・計画は「BUまるごと（全店舗ぶん）」を1つのキーとして保存・送信している。
+   そのため、他の端末が別の店舗のデータを入力・送信した直後に、こちらの端末で
+   1店舗だけ編集してそのまま送信すると、こちらの端末がまだ持っていない
+   （＝ローカルでは空の）他店舗のデータをサーバー上から消してしまう事故が起きる。
+   これを防ぐため、送信前に必ずサーバーの最新値を取得し、
+   「ローカルに何もデータが無い店舗」だけはサーバー側の値で補ってから送信する。
+   ローカルに既にデータがある店舗は（多少古い可能性があっても）上書きしない
+   ＝自分が今まさに編集した内容を消す方向には絶対に働かない。
+   多少古いままの店舗が残るケースは、通常の20秒おきの自動同期で自然に解消される。 */
+async function sbuSyncMergeAndPush(dept, month){
+  const m = month ?? getMonth();
+  if(!sbuSyncEnabled || !sbuSyncUrl) return;
+  const remoteData = await sbuSyncFetchFresh();
+  if(remoteData){
+    let mergedAny = false;
+    [["actuals",actuals],["plans",plans]].forEach(([kind,bucket])=>{
+      const key = sk(dept,kind,m);
+      const remoteRaw = remoteData[key];
+      if(!remoteRaw) return;
+      let remoteObj;
+      try{ remoteObj = JSON.parse(remoteRaw.json); }catch(e){ return; }
+      if(!remoteObj || typeof remoteObj!=="object") return;
+      if(!bucket[dept]) bucket[dept] = {};
+      const localObj = bucket[dept];
+      Object.keys(remoteObj).forEach(s=>{
+        const localHasData = localObj[s] && Object.keys(localObj[s]).length>0;
+        const remoteHasData = remoteObj[s] && Object.keys(remoteObj[s]).length>0;
+        if(!localHasData && remoteHasData){ localObj[s] = remoteObj[s]; mergedAny = true; }
+      });
+    });
+    if(mergedAny){ saveAll(m); renderCurrent(); }
+  }
+  sbuSyncPushDept(dept, m);
+}
 /* ローカルに保存されている全BU×全対象月の実績・計画データを、
    スプレッドシートへまとめて送信し直す（過去の同期不具合の復旧用） */
 function sbuSyncPushAllLocal(){
@@ -2723,7 +2781,7 @@ function ua(dept,s,d,v){
   if(!isNaN(n)&&n>=0) actuals[dept][s][d]={val:n,isLY:false};
   else delete actuals[dept][s][d];
   saveAll();
-  sbuSyncPushDept(dept);
+  sbuSyncMergeAndPush(dept);
   renderDeptKPI(dept);renderDeptStores(dept);updateCalcCells(dept);
 }
 function up2(dept,s,d,v){
@@ -2733,7 +2791,7 @@ function up2(dept,s,d,v){
   if(!isNaN(n)&&n>=0) plans[dept][s][d]=n;
   else delete plans[dept][s][d];
   saveAll();
-  sbuSyncPushDept(dept);
+  sbuSyncMergeAndPush(dept);
   renderDeptKPI(dept);renderDeptStores(dept);updateCalcCells(dept);
 }
 
@@ -2825,7 +2883,7 @@ function bulkFill(dept,mode){
     });
   });
   saveAll();renderDept(dept);
-  sbuSyncPushDept(dept);
+  sbuSyncMergeAndPush(dept);
   showToast(`計画に${count}件を入力しました`);
 }
 function bulkClear(dept){
