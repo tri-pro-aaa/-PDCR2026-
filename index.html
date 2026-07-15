@@ -4786,6 +4786,7 @@ function buildDeptHTML(dept){
 
   <!-- KPI・ストアカード（月次累積固定） -->
   <div class="kpi-grid" id="kpi-${dept}"></div>
+  <div class="kpi-grid" id="kpi2-${dept}" style="margin-top:-4px"></div>
   <div class="store-grid" id="stores-${dept}"></div>
 
   <!-- 今週のピックアップ（VMD視点：累積 / 先週との差） -->
@@ -5085,33 +5086,48 @@ function renderDeptKPI(dept){
   });
   const pbr=ftp&&ftb?ftp/ftb:null;   /* 計画予算比 */
   const plyr=ftp&&ftl?ftp/ftl:null;  /* 計画昨対比 */
+  const budgetDiff=tc?ta-tb:null, planDiff=tc?ta-planBase:null, lyDiff=tc?ta-tl:null;
   const el=document.getElementById(`kpi-${dept}`);
-  if(!el) return;
+  const el2=document.getElementById(`kpi2-${dept}`);
+  if(!el||!el2) return;
   const noUploadBadge=hasUpload?"":`<span style="font-size:10px;background:#fff8e1;color:#e65100;padding:2px 8px;border-radius:10px;border:0.5px solid #ffe082;margin-left:6px">予算未登録</span>`;
+
+  /* 1段目：合計予算・計画・計画予算比・計画昨対比（実績の有無に関係ない「計画の妥当性」を見る段。全て月全体ベース） */
   el.innerHTML=`
-    <div class="kpi"><div class="kpi-label">予算（${stores.length}店舗計）${noUploadBadge}</div>
+    <div class="kpi" style="background:#eef3f7;border:0.5px solid #cfdce6;border-left:3px solid #3a6a8a;border-radius:0 10px 10px 0">
+      <div class="kpi-label" style="color:#2a5a7a">合計予算${noUploadBadge}</div>
+      <div class="kpi-val" style="${!hasUpload?'color:#aaa':''}">${hasUpload?f(ftb):'—'}</div>
+      <div class="kpi-sub" style="color:#5a8aa8">${stores.length}店舗・月全体</div></div>
+    <div class="kpi" style="background:#eef3f7;border:0.5px solid #cfdce6;border-left:3px solid #3a6a8a;border-radius:0 10px 10px 0">
+      <div class="kpi-label" style="color:#2a5a7a">計画</div>
+      <div class="kpi-val" style="${!ftp?'color:#aaa':''}">${ftp?f(ftp):'—'}</div>
+      <div class="kpi-sub" style="color:#5a8aa8">月全体</div></div>
+    <div class="kpi" style="background:#eef3f7;border:0.5px solid #cfdce6;border-left:3px solid #3a6a8a;border-radius:0 10px 10px 0">
+      <div class="kpi-label" style="color:#2a5a7a">計画予算比</div>
+      <div class="kpi-val ${rc(pbr)}" style="${pbr==null?'color:#aaa':''}">${ftp?fr(pbr):'—'}</div>
+      <div class="kpi-sub" style="color:#5a8aa8">計画÷予算</div></div>
+    <div class="kpi" style="background:#eef3f7;border:0.5px solid #cfdce6;border-left:3px solid #3a6a8a;border-radius:0 10px 10px 0">
+      <div class="kpi-label" style="color:#2a5a7a">計画昨対比</div>
+      <div class="kpi-val ${rc(plyr)}" style="${plyr==null?'color:#aaa':''}">${ftp?fr(plyr):'—'}</div>
+      <div class="kpi-sub" style="color:#5a8aa8">計画÷昨年実績</div></div>`;
+
+  /* 2段目：予算（進捗分）・累積実績・予算比・計画比・昨対比（進捗ベースの実績評価。差額はカード内に表示） */
+  el2.innerHTML=`
+    <div class="kpi"><div class="kpi-label">予算（${stores.length}店舗計・進捗分）</div>
       <div class="kpi-val" style="${!hasUpload?'color:#aaa':''}">${hasUpload?f(tb):'—'}</div>
       <div class="kpi-sub">${progressLabel}</div></div>
-    <div class="kpi"><div class="kpi-label">実績</div>
+    <div class="kpi"><div class="kpi-label">累積実績</div>
       <div class="kpi-val ${rc(r)}">${f(tc?ta:null)}</div>
       <div class="kpi-sub">${progressLabel}</div></div>
     <div class="kpi"><div class="kpi-label">予算比</div>
       <div class="kpi-val ${rc(r)}">${hasUpload?fr(r):'—'}</div>
-      <div class="kpi-sub">${r!=null&&hasUpload?`<span class="badge badge-${rc(r)}">${r>=1?"達成":"未達"}</span>`:""}</div></div>
+      <div class="kpi-sub">${budgetDiff!=null&&hasUpload?`差額 <span class="${dc(budgetDiff)}">${fd(budgetDiff)}</span>`:""}</div></div>
     <div class="kpi"><div class="kpi-label">計画比</div>
       <div class="kpi-val ${rc(rp)}">${hasUpload?fr(rp):'—'}</div>
-      <div class="kpi-sub">${rp!=null&&hasUpload?`<span class="badge badge-${rc(rp)}">${rp>=1?"達成":"未達"}</span>`:""}</div></div>
-    <div class="kpi"><div class="kpi-label">昨年比</div>
+      <div class="kpi-sub">${planDiff!=null&&hasUpload?`差額 <span class="${dc(planDiff)}">${fd(planDiff)}</span>`:""}</div></div>
+    <div class="kpi"><div class="kpi-label">昨対比</div>
       <div class="kpi-val ${rc(lr)}">${hasUpload?fr(lr):'—'}</div>
-      <div class="kpi-sub">対昨年実績</div></div>
-    <div class="kpi" style="background:#eef3f7;border:0.5px solid #cfdce6;border-left:3px solid #3a6a8a;border-radius:0 10px 10px 0">
-      <div class="kpi-label" style="color:#2a5a7a">計画予算比</div>
-      <div class="kpi-val ${rc(pbr)}" style="${pbr==null?'color:#aaa':''}">${tp?fr(pbr):'—'}</div>
-      <div class="kpi-sub" style="color:#5a8aa8">計画÷予算</div></div>
-    <div class="kpi" style="background:#eef3f7;border:0.5px solid #cfdce6;border-left:3px solid #3a6a8a;border-radius:0 10px 10px 0">
-      <div class="kpi-label" style="color:#2a5a7a">計画昨対比</div>
-      <div class="kpi-val ${rc(plyr)}" style="${plyr==null?'color:#aaa':''}">${tp?fr(plyr):'—'}</div>
-      <div class="kpi-sub" style="color:#5a8aa8">計画÷昨年実績</div></div>`;
+      <div class="kpi-sub">${lyDiff!=null&&hasUpload?`差額 <span class="${dc(lyDiff)}">${fd(lyDiff)}</span>`:""}</div></div>`;
   const lbl=document.getElementById(`dept-month-lbl-${dept}`);
   if(lbl) lbl.textContent=`2026年${m}月`;
 }
