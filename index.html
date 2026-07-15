@@ -4576,9 +4576,12 @@ function renderSummary(){
   const pbr  = ftp&&ftb?ftp/ftb:null;  /* 計画予算比（全BU合算） */
   const plyr = ftp&&ftl?ftp/ftl:null;  /* 計画昨対比（全BU合算） */
 
-  /* 1段目：予算・計画・計画予算比・計画昨対比（実績の有無に関係ない「計画の妥当性」を見る段） */
+  /* 1段目：合計予算・計画・計画予算比・計画昨対比（実績の有無に関係ない「計画の妥当性」を見る段。全て月全体ベース） */
   document.getElementById("sum-kpi").innerHTML=`
-    <div class="kpi"><div class="kpi-label">予算（全BU合算・進捗分）</div><div class="kpi-val">${f(tb)}</div><div class="kpi-sub">${DEPTS.length}BU ${stores.length}店舗</div></div>
+    <div class="kpi" style="background:#eef3f7;border:0.5px solid #cfdce6;border-left:3px solid #3a6a8a;border-radius:0 10px 10px 0">
+      <div class="kpi-label" style="color:#2a5a7a">合計予算</div>
+      <div class="kpi-val" style="${!ftb?'color:#aaa':''}">${ftb?f(ftb):'—'}</div>
+      <div class="kpi-sub" style="color:#5a8aa8">${DEPTS.length}BU ${stores.length}店舗・月全体</div></div>
     <div class="kpi" style="background:#eef3f7;border:0.5px solid #cfdce6;border-left:3px solid #3a6a8a;border-radius:0 10px 10px 0">
       <div class="kpi-label" style="color:#2a5a7a">計画（全BU合算）</div>
       <div class="kpi-val" style="${!ftp?'color:#aaa':''}">${ftp?f(ftp):'—'}</div>
@@ -4592,8 +4595,9 @@ function renderSummary(){
       <div class="kpi-val ${rc(plyr)}" style="${plyr==null?'color:#aaa':''}">${ftp?fr(plyr):'—'}</div>
       <div class="kpi-sub" style="color:#5a8aa8">全BU計画÷昨年実績</div></div>`;
 
-  /* 2段目：累積実績・予算比・計画比・昨対比（進捗ベースの実績評価。差額はカード内に表示） */
+  /* 2段目：予算（進捗分）・累積実績・予算比・計画比・昨対比（進捗ベースの実績評価。差額はカード内に表示） */
   document.getElementById("sum-kpi2").innerHTML=`
+    <div class="kpi"><div class="kpi-label">予算（全BU合算・進捗分）</div><div class="kpi-val">${f(tb)}</div><div class="kpi-sub">${DEPTS.length}BU ${stores.length}店舗</div></div>
     <div class="kpi"><div class="kpi-label">累積実績</div><div class="kpi-val ${rc(r)}">${f(tc?ta:null)}</div><div class="kpi-sub">${progressLabel}</div></div>
     <div class="kpi"><div class="kpi-label">予算比</div><div class="kpi-val ${rc(r)}">${fr(r)}</div>
       <div class="kpi-sub">${budgetDiff!=null?`差額 <span class="${dc(budgetDiff)}">${fd(budgetDiff)}</span>`:""}</div></div>
