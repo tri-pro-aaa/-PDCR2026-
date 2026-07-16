@@ -2302,17 +2302,21 @@ function sbuSyncFetchFresh(){
   });
 }
 /* 実績・計画は「BUまるごと（全店舗ぶん）」を1つのキーとして保存・送信している。
-   そのため、他の端末が別の店舗のデータを入力・送信した直後に、こちらの端末で
-   1店舗だけ編集してそのまま送信すると、こちらの端末がまだ持っていない
-   （＝ローカルでは空の）他店舗のデータをサーバー上から消してしまう事故が起きる。
-   これを防ぐため、送信前に必ずサーバーの最新値を取得し、
-   「ローカルに何もデータが無い店舗」だけはサーバー側の値で補ってから送信する。
-   ローカルに既にデータがある店舗は（多少古い可能性があっても）上書きしない
-   ＝自分が今まさに編集した内容を消す方向には絶対に働かない。
-   多少古いままの店舗が残るケースは、通常の20秒おきの自動同期で自然に解消される。 */
-async function sbuSyncMergeAndPush(dept, month){
+   そのため、他の端末（別店舗を担当する端末や、まだ同期していない新しい端末など）が
+   持っている「こちらのローカルには無い日付のデータ」を、そのまま送信すると
+   サーバー上から消してしまう事故が起きる（店舗単位だけでなく、同じ店舗でも
+   日付単位で起こりうる。例：再シード直後の端末が過去12日分しか持っておらず、
+   別端末が入力済みの13・14日目を消してしまう）。
+   これを防ぐため、送信前に必ずサーバーの最新値を取得し、日付単位で
+   「ローカルにまだ値が無い日付」だけサーバー側の値で補ってから送信する。
+   ただし「今まさにこの端末で削除した日付」までサーバー側の古い値で
+   補ってしまうと、セルを空にしたはずが元に戻って見える不具合になるため、
+   呼び出し元が明示的に指定した対象セル（skip）は、ローカルが空でも
+   絶対にサーバー側の値で補わない（削除を尊重する）。 */
+async function sbuSyncMergeAndPush(dept, month, skip){
   const m = month ?? getMonth();
   if(!sbuSyncEnabled || !sbuSyncUrl) return;
+  const skipSet = new Set((skip||[]).map(t=>`${t.kind}|${t.s}|${t.d}`));
   const remoteData = await sbuSyncFetchFresh();
   if(remoteData){
     let mergedAny = false;
@@ -2326,9 +2330,15 @@ async function sbuSyncMergeAndPush(dept, month){
       if(!bucket[dept]) bucket[dept] = {};
       const localObj = bucket[dept];
       Object.keys(remoteObj).forEach(s=>{
-        const localHasData = localObj[s] && Object.keys(localObj[s]).length>0;
-        const remoteHasData = remoteObj[s] && Object.keys(remoteObj[s]).length>0;
-        if(!localHasData && remoteHasData){ localObj[s] = remoteObj[s]; mergedAny = true; }
+        const remoteStoreObj = remoteObj[s];
+        if(!remoteStoreObj || typeof remoteStoreObj!=="object") return;
+        if(!localObj[s]) localObj[s] = {};
+        Object.keys(remoteStoreObj).forEach(day=>{
+          if(localObj[s][day] === undefined && !skipSet.has(`${kind}|${s}|${day}`)){
+            localObj[s][day] = remoteStoreObj[day];
+            mergedAny = true;
+          }
+        });
       });
     });
     if(mergedAny){ saveAll(m); renderCurrent(); }
@@ -2782,7 +2792,7 @@ function ua(dept,s,d,v){
   if(!isNaN(n)&&n>=0) actuals[dept][s][d]={val:n,isLY:false};
   else delete actuals[dept][s][d];
   saveAll();
-  sbuSyncMergeAndPush(dept);
+  sbuSyncMergeAndPush(dept, undefined, [{kind:'actuals',s,d}]);
   renderDeptKPI(dept);renderDeptStores(dept);updateCalcCells(dept);
 }
 function up2(dept,s,d,v){
@@ -2792,7 +2802,7 @@ function up2(dept,s,d,v){
   if(!isNaN(n)&&n>=0) plans[dept][s][d]=n;
   else delete plans[dept][s][d];
   saveAll();
-  sbuSyncMergeAndPush(dept);
+  sbuSyncMergeAndPush(dept, undefined, [{kind:'plans',s,d}]);
   renderDeptKPI(dept);renderDeptStores(dept);updateCalcCells(dept);
 }
 
@@ -2894,9 +2904,13 @@ function bulkClear(dept){
   const targets=sv==="ALL"?[...stores]:[sv];
   const days=wv==="ALL"?allDays():wdays(+wv);
   let count=0;
-  targets.forEach(s=>days.forEach(d=>{if(plans[dept]?.[s]?.[d]!=null){delete plans[dept][s][d];count++;}}));
+  const skip=[];
+  targets.forEach(s=>days.forEach(d=>{
+    skip.push({kind:'plans',s,d});
+    if(plans[dept]?.[s]?.[d]!=null){delete plans[dept][s][d];count++;}
+  }));
   saveAll();renderDept(dept);
-  sbuSyncPushDept(dept);
+  sbuSyncMergeAndPush(dept, undefined, skip);
   showToast(`計画を${count}件消去しました`);
 }
 /* 指定日範囲（from〜to日）の実績をまとめて削除する。
@@ -2910,14 +2924,16 @@ function bulkClearActuals(dept){
   const storeLabel=sv==="ALL"?"全店舗":sv+"店";
   if(!confirm(`${storeLabel}の${from}日〜${to}日の実績をすべて削除します。よろしいですか？`)) return;
   let count=0;
+  const skip=[];
   targets.forEach(s=>{
-    if(!actuals[dept][s]) return;
+    if(!actuals[dept][s]) actuals[dept][s]={};
     for(let d=from; d<=to; d++){
+      skip.push({kind:'actuals',s,d});
       if(actuals[dept][s][d]!=null){ delete actuals[dept][s][d]; count++; }
     }
   });
   saveAll(); renderDept(dept);
-  sbuSyncPushDept(dept);
+  sbuSyncMergeAndPush(dept, undefined, skip);
   showToast(`実績を${count}件削除しました`);
 }
 
@@ -3091,9 +3107,10 @@ function parseActualCSV(text, fname){
 
   saveAll();
   /* 取り込んだBUをスプレッドシートへも送信する（同期がONの場合）。
-     これをしないと、ローカルには正しく保存されても、次の自動同期(Pull)で
-     まだ更新されていないスプレッドシート側の古いデータに上書きされてしまう */
-  updatedBUs.forEach(bu=>{ if(typeof sbuSyncPushDept==="function") sbuSyncPushDept(bu); });
+     単純に送信するだけだと、CSVがカバーしていない日付・店舗のデータを
+     他端末が持っていた場合にそれを消してしまうため、送信前に必ず
+     サーバーの最新値を取得し、ローカルに無い日付だけ補ってから送る */
+  updatedBUs.forEach(bu=>{ if(typeof sbuSyncMergeAndPush==="function") sbuSyncMergeAndPush(bu); });
   const lbl=document.getElementById("actual-upload-status");
   if(lbl) lbl.textContent=`✓ ${fname}（${count}件を読み込み、${skipCount}件スキップ）`;
   lbl && (lbl.style.color="#2e7d32");
@@ -5591,7 +5608,12 @@ const UPLOADED_ACTUALS_7 = {"ホールセールパン":{"上津役":{"1":{"val":
           });
         }
       });
-      if(deptSeeded && typeof sbuSyncPushDept==="function") sbuSyncPushDept(dept);
+      /* シード対象日を上書きした「あと」に送信するが、送信前に必ずサーバーの最新値を
+         取得し直し、ローカルにまだ無い日付（シード範囲外の日に他端末が入力した実績など）
+         をサーバー側の値で補ってから送る。これをしないと、シード用の静的データしか
+         持たない新しい端末（またはローカルを消した端末）が再シードした際、
+         シード範囲外の日（13日目・14日目など）を丸ごと消してしまう事故が起きる */
+      if(deptSeeded && typeof sbuSyncMergeAndPush==="function") sbuSyncMergeAndPush(dept, m);
     });
   } else {
     localStorage.setItem("sbu2_actuals_seed_version", ACTUALS_SEED_VERSION); return;
