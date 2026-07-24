@@ -3749,6 +3749,11 @@ const CHANGELOG = [
     author: "Claude",
     content: "残り16BUについても、同じ「同週同曜日」対応でUPLOADED_BU_STORE_8のly（昨年実績）を更新。全17BU・6店舗×31日分＝3,162件、欠損なく反映（全17BU合計11億2,913万円）。インバス・アウトバスケアラインの生活消耗への付け替え、ビューティーケア＋ヘルスのビューティ・ヘルスへの統合も引き続き適用。"
   },
+  {
+    date: "2026-07-24",
+    author: "Claude",
+    content: "ホールセールパンで「入力した計画が消える」不具合を修正。原因は先日追加した8月度クリーンアップ処理（cleanupAugustDataMistake）が、「計画の値が予算の値と完全一致していたら自動生成された誤りとみなして削除する」という判定をしており、本当に人が予算と同じ値を意図的に計画として入力した場合まで削除してしまっていたため。しかもこの処理は端末ごとに初回アクセス時に発動する仕組みだったため、新しい端末でページを開くたびに再発していた。原因となった自動コピー機能（fillDefaultLY）は既に完全に削除済みで再発の心配が無いため、このクリーンアップ処理自体を削除した。"
+  },
 ];
 
 function renderChangelog(){
@@ -5528,67 +5533,6 @@ const UPLOADED_ACTUALS_7 = {"ホールセールパン":{"上津役":{"1":{"val":
 
 saveAll();
 lastSelectedMonth=getMonth();
-
-/* 8月度予算の反映時、fillDefaultLY（廃止済み）によって予算の値がそのまま「計画」に
-   自動コピーされてしまっていたため、該当データを一回限りでクリーンアップする。
-   あわせて、まだ運用前の8月にライフスタイルの実績が誤って入っていたためクリアする。
-   localStorageを直接操作するのは、メモリ上のplans/actualsが「現在表示中の月」のものしか
-   保持していないため（8月を見ていなくても確実にクリーンアップするため） */
-(function cleanupAugustDataMistake(){
-  const CLEANUP_VERSION = "1";
-  const verKey = "sbu2_august_cleanup_version";
-  if(localStorage.getItem(verKey) === CLEANUP_VERSION) return;
-  const m = 8;
-  const changedDepts = new Set();
-
-  DEPTS.forEach(dept=>{
-    const bud = uploadedBudget[dept]?.[m];
-    if(!bud) return;
-    const plansKey = sk(dept, "plans", m);
-    let p;
-    try{ p = JSON.parse(localStorage.getItem(plansKey) || "{}"); }catch(e){ p = {}; }
-    let changed = false;
-    stores.forEach(s=>{
-      if(!p[s]) return;
-      Object.keys(p[s]).forEach(day=>{
-        const budget = bud[s]?.[day]?.budget;
-        /* fillDefaultLYが生成した値は「予算の値そのまま」なので、完全一致する場合のみ削除する */
-        if(budget!=null && p[s][day]===budget){
-          delete p[s][day];
-          changed = true;
-        }
-      });
-    });
-    if(changed){
-      localStorage.setItem(plansKey, JSON.stringify(p));
-      changedDepts.add(dept);
-    }
-  });
-
-  /* ライフスタイルの8月実績をクリア */
-  const lsActualsKey = sk("ライフスタイル", "actuals", m);
-  const lsActualsRaw = localStorage.getItem(lsActualsKey);
-  if(lsActualsRaw && lsActualsRaw !== "{}"){
-    let obj;
-    try{ obj = JSON.parse(lsActualsRaw); }catch(e){ obj = {}; }
-    const hasAny = Object.values(obj).some(dayMap=>dayMap && Object.keys(dayMap).length>0);
-    if(hasAny){
-      const emptyObj = {};
-      stores.forEach(s=>{ emptyObj[s]={}; });
-      localStorage.setItem(lsActualsKey, JSON.stringify(emptyObj));
-      changedDepts.add("ライフスタイル");
-    }
-  }
-
-  /* 今表示中の月が8月なら、メモリ上のplans/actualsにも反映する */
-  if(getMonth()===8) loadAll();
-
-  /* 変更があったBUはスプレッドシートへも送信する */
-  if(changedDepts.size>0 && typeof sbuSyncPushDept==="function"){
-    changedDepts.forEach(dept=>sbuSyncPushDept(dept, m));
-  }
-  localStorage.setItem(verKey, CLEANUP_VERSION);
-})();
 
 sbuSyncInit();
 weatherLoadCache();
