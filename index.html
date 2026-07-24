@@ -363,6 +363,7 @@ input.pi:focus{outline:none;border-color:#9c27b0;background:#fff}
   <div class="flex-row">
     <span style="font-size:15px;font-weight:500;color:#1e3a5f">担当するBUを選択してください</span>
   </div>
+  <div class="kpi-grid" id="home-kpi" style="margin-bottom:14px"></div>
   <div class="bu-select-grid" id="bu-select-grid"></div>
 </div>
 
@@ -3754,6 +3755,16 @@ const CHANGELOG = [
     author: "Claude",
     content: "ホールセールパンで「入力した計画が消える」不具合を修正。原因は先日追加した8月度クリーンアップ処理（cleanupAugustDataMistake）が、「計画の値が予算の値と完全一致していたら自動生成された誤りとみなして削除する」という判定をしており、本当に人が予算と同じ値を意図的に計画として入力した場合まで削除してしまっていたため。しかもこの処理は端末ごとに初回アクセス時に発動する仕組みだったため、新しい端末でページを開くたびに再発していた。原因となった自動コピー機能（fillDefaultLY）は既に完全に削除済みで再発の心配が無いため、このクリーンアップ処理自体を削除した。"
   },
+  {
+    date: "2026-07-24",
+    author: "Claude",
+    content: "サマリーページ（エリア全体サマリー）のKPIに「計画予算比」「計画昨対比」を追加。他の画面（KPIカード・店舗別カード・ホーム画面・週次サマリー）と同様、実績の有無に関係なく月全体の計画・予算・昨年実績で計算する。月選択と連動するため、8月を選べば8月度の数値が表示される。"
+  },
+  {
+    date: "2026-07-24",
+    author: "Claude",
+    content: "ホーム画面（BU選択画面）の上部にも、エリア全体（全17BU合算）の「計画予算比」「計画昨対比」を追加。各BUカード個別の値は以前から表示済みだったが、画面全体を見渡した一目でわかる集計値が無かったため追加。"
+  },
 ];
 
 function renderChangelog(){
@@ -3773,6 +3784,25 @@ function renderBuSelectGrid(){
   const el=document.getElementById("bu-select-grid");
   if(!el) return;
   const allD=allDays();
+
+  /* エリア全体（全BU合算）の計画予算比・計画昨対比。実績の有無に関係ない指標なので月全体(allD)で計算する */
+  const kpiEl=document.getElementById("home-kpi");
+  if(kpiEl){
+    let ftb=0,ftp=0,ftl=0;
+    DEPTS.forEach(dept=>{
+      stores.forEach(s=>{
+        ftb+=sumB(dept,s,allD);
+        ftp+=sumP(dept,s,allD)||0;
+        ftl+=sumL(dept,s,allD);
+      });
+    });
+    const pbr=ftp&&ftb?ftp/ftb:null;
+    const plyr=ftp&&ftl?ftp/ftl:null;
+    kpiEl.innerHTML=`
+      <div class="kpi"><div class="kpi-label" style="color:#6a1b9a">計画予算比（エリア全体）</div><div class="kpi-val ${rc(pbr)}">${fr(pbr)}</div><div class="kpi-sub">計画÷予算</div></div>
+      <div class="kpi"><div class="kpi-label" style="color:#6a1b9a">計画昨対比（エリア全体）</div><div class="kpi-val ${rc(plyr)}">${fr(plyr)}</div><div class="kpi-sub">計画÷昨年実績</div></div>`;
+  }
+
   el.innerHTML=DEPTS.map(dept=>{
     /* 実績が1件でも入力されている日付だけを集計対象にする（進捗ベースの比較のため） */
     const inputDays = allD.filter(d => stores.some(s => getVal(dept,s,d)!=null));
@@ -4541,6 +4571,18 @@ function renderSummary(){
   const planDiff   = tc ? ta-planBase : null;
   const lyDiff     = tc ? ta-tl : null;
 
+  /* 計画予算比・計画昨対比は実績の有無に関係ない指標なので、進捗日数ではなく月全体(allD)で計算する */
+  let ftb=0,ftp=0,ftl=0;
+  DEPTS.forEach(dept=>{
+    stores.forEach(s=>{
+      ftb+=sumB(dept,s,allD);
+      ftp+=sumP(dept,s,allD)||0;
+      ftl+=sumL(dept,s,allD);
+    });
+  });
+  const pbr=ftp&&ftb?ftp/ftb:null;   /* 計画予算比 */
+  const plyr=ftp&&ftl?ftp/ftl:null;  /* 計画昨対比 */
+
   document.getElementById("sum-kpi").innerHTML=`
     <div class="kpi"><div class="kpi-label">予算（全BU合算・進捗分）</div><div class="kpi-val">${f(tb)}</div><div class="kpi-sub">${DEPTS.length}BU ${stores.length}店舗</div></div>
     <div class="kpi"><div class="kpi-label">累積実績</div><div class="kpi-val ${rc(r)}">${f(tc?ta:null)}</div><div class="kpi-sub">${progressLabel}</div></div>
@@ -4549,7 +4591,11 @@ function renderSummary(){
     <div class="kpi"><div class="kpi-label">計画比</div><div class="kpi-val ${rc(rp)}">${fr(rp)}</div>
       <div class="kpi-sub">${planDiff!=null?`差額 <span class="${dc(planDiff)}">${fd(planDiff)}</span>`:""}</div></div>
     <div class="kpi"><div class="kpi-label">昨対比</div><div class="kpi-val ${rc(lr)}">${fr(lr)}</div>
-      <div class="kpi-sub">${lyDiff!=null?`差額 <span class="${dc(lyDiff)}">${fd(lyDiff)}</span>`:""}</div></div>`;
+      <div class="kpi-sub">${lyDiff!=null?`差額 <span class="${dc(lyDiff)}">${fd(lyDiff)}</span>`:""}</div></div>
+    <div class="kpi"><div class="kpi-label" style="color:#6a1b9a">計画予算比</div><div class="kpi-val ${rc(pbr)}">${fr(pbr)}</div>
+      <div class="kpi-sub">計画÷予算</div></div>
+    <div class="kpi"><div class="kpi-label" style="color:#6a1b9a">計画昨対比</div><div class="kpi-val ${rc(plyr)}">${fr(plyr)}</div>
+      <div class="kpi-sub">計画÷昨年実績</div></div>`;
 
   /* BUカード */
   document.getElementById("sum-dept-cards").innerHTML=DEPTS.map(dept=>{
