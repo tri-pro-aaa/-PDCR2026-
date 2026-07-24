@@ -3734,6 +3734,11 @@ const CHANGELOG = [
     author: "Claude",
     content: "2025年8月度の実績データ（RESULT_-_2026-07-23T093531_094.CSVより）を、UPLOADED_BU_STORE_8のly（昨年実績）フィールドに反映。予算アップロード時と同様、「インバス・アウトバスケア」ラインがビューティーケアディビジョンに誤分類されていたため、生活消耗へ付け替えたうえで17BU体系に集約。全17BU・6店舗×31日分＝3,162件、欠損なく反映（全17BU合計11億3,253万円、事前に提示した集計と一致）。"
   },
+  {
+    date: "2026-07-23",
+    author: "Claude",
+    content: "サマリーページの「BU別　月次計画比」カードと「週次推移（BU×週）」テーブルの計画比・差異が、ラベルは「計画比」なのに実際には計画(plans)を使わず予算(budget)だけで計算されていた不具合を修正（deptRatio関数が計画を考慮していなかったため）。計画が入力されていればそれを分母に、未入力の場合は予算にフォールバックする計算に統一。BUカード・週次推移テーブルの各週/累積・合計行、あわせて4箇所を修正。"
+  },
 ];
 
 function renderChangelog(){
@@ -4533,13 +4538,16 @@ function renderSummary(){
 
   /* BUカード */
   document.getElementById("sum-dept-cards").innerHTML=DEPTS.map(dept=>{
-    const b=deptSumB(dept,ad),a=deptSumA(dept,ad),r2=deptRatio(dept,ad);
+    const b=deptSumB(dept,ad),a=deptSumA(dept,ad),p=deptSumP(dept,ad);
+    /* 「計画比」なので本来は計画(p)を分母にする。計画が未入力の場合は予算(b)にフォールバック */
+    const planBase=p!=null?p:b;
+    const r2=a!=null&&planBase?a/planBase:null;
     const pct=r2!=null?Math.min(r2*100,110):0;
     const bc=r2==null?"#c0c0be":r2>=1?"#2e7d32":r2>=0.95?"#e65100":"#c62828";
     return `<div class="sum-dept-card" onclick="switchPage('dept-${dept}')" style="cursor:pointer">
       <div class="sum-dept-name">${dept}</div>
       <div class="sum-dept-ratio ${rc(r2)}">${fr(r2)}</div>
-      <div class="sum-dept-nums">${f(a)} / ${f(b)}</div>
+      <div class="sum-dept-nums">${f(a)} / ${f(planBase)}</div>
       <div class="bar-wrap"><div class="bar-fill" style="width:${pct.toFixed(0)}%;background:${bc}"></div></div>
     </div>`;
   }).join("");
@@ -4564,12 +4572,17 @@ function renderSummary(){
     validWeeks.forEach((w,wi)=>{
       const wd=weekInputDays(wi);
       if(wd.length===0){ tbody+=`<td>—</td><td>—</td><td class="blk-end">—</td>`; return; }
-      const a=deptSumA(dept,wd),b=deptSumB(dept,wd),r3=deptRatio(dept,wd),l=deptSumL(dept,wd);
-      const dv=a!=null?a-b:null;
+      const a=deptSumA(dept,wd),b=deptSumB(dept,wd),p=deptSumP(dept,wd),l=deptSumL(dept,wd);
+      /* 「計画比」なので本来は計画(p)を分母にする。計画が未入力の場合は予算(b)にフォールバック */
+      const planBase=p!=null?p:b;
+      const r3=a!=null&&planBase?a/planBase:null;
+      const dv=a!=null?a-planBase:null;
       const lv=a!=null&&l?a-l:null;
       tbody+=`<td class="${rc(r3)}">${fr(r3)}</td><td class="${dc(dv)}">${fd(dv)}</td><td class="${dc(lv)} blk-end">${fd(lv)}</td>`;
     });
-    const a=deptSumA(dept,ad),b=deptSumB(dept,ad),r4=deptRatio(dept,ad),dv=a!=null?a-b:null;
+    const a=deptSumA(dept,ad),b=deptSumB(dept,ad),p=deptSumP(dept,ad);
+    const planBase=p!=null?p:b;
+    const r4=a!=null&&planBase?a/planBase:null,dv=a!=null?a-planBase:null;
     const l4=deptSumL(dept,ad),lv4=a!=null&&l4?a-l4:null;
     tbody+=`<td class="${rc(r4)}">${fr(r4)}</td><td class="${dc(dv)}">${fd(dv)}</td><td class="${dc(lv4)}">${fd(lv4)}</td></tr>`;
   });
@@ -4578,14 +4591,24 @@ function renderSummary(){
   validWeeks.forEach((w,wi)=>{
     const wd=weekInputDays(wi);
     if(wd.length===0){ tbody+=`<td>—</td><td>—</td><td class="blk-end">—</td>`; return; }
-    let tb2=0,ta2=0,tl2=0,has=false;
-    DEPTS.forEach(d=>{tb2+=deptSumB(d,wd);tl2+=deptSumL(d,wd);const a=deptSumA(d,wd);if(a!=null){ta2+=a;has=true;}});
-    const r5=has&&tb2?ta2/tb2:null,dv=has?ta2-tb2:null,lv=has&&tl2?ta2-tl2:null;
+    let tb2=0,tp2=0,ta2=0,tl2=0,has=false;
+    DEPTS.forEach(d=>{
+      tb2+=deptSumB(d,wd);
+      const p=deptSumP(d,wd); tp2+=(p!=null?p:deptSumB(d,wd));
+      tl2+=deptSumL(d,wd);
+      const a=deptSumA(d,wd);if(a!=null){ta2+=a;has=true;}
+    });
+    const r5=has&&tp2?ta2/tp2:null,dv=has?ta2-tp2:null,lv=has&&tl2?ta2-tl2:null;
     tbody+=`<td class="${rc(r5)}">${fr(r5)}</td><td class="${dc(dv)}">${fd(dv)}</td><td class="${dc(lv)} blk-end">${fd(lv)}</td>`;
   });
-  let tb3=0,ta3=0,tl3=0,has3=false;
-  DEPTS.forEach(d=>{tb3+=deptSumB(d,ad);tl3+=deptSumL(d,ad);const a=deptSumA(d,ad);if(a!=null){ta3+=a;has3=true;}});
-  const r6=has3&&tb3?ta3/tb3:null,dv3=has3?ta3-tb3:null,lv3=has3&&tl3?ta3-tl3:null;
+  let tb3=0,tp3=0,ta3=0,tl3=0,has3=false;
+  DEPTS.forEach(d=>{
+    tb3+=deptSumB(d,ad);
+    const p=deptSumP(d,ad); tp3+=(p!=null?p:deptSumB(d,ad));
+    tl3+=deptSumL(d,ad);
+    const a=deptSumA(d,ad);if(a!=null){ta3+=a;has3=true;}
+  });
+  const r6=has3&&tp3?ta3/tp3:null,dv3=has3?ta3-tp3:null,lv3=has3&&tl3?ta3-tl3:null;
   tbody+=`<td class="${rc(r6)}">${fr(r6)}</td><td class="${dc(dv3)}">${fd(dv3)}</td><td class="${dc(lv3)}">${fd(lv3)}</td></tr>`;
   document.getElementById("sum-tbody").innerHTML=tbody;
 }
