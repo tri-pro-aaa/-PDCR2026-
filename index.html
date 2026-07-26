@@ -3765,6 +3765,11 @@ const CHANGELOG = [
     author: "Claude",
     content: "ホーム画面（BU選択画面）の上部にも、エリア全体（全17BU合算）の「計画予算比」「計画昨対比」を追加。各BUカード個別の値は以前から表示済みだったが、画面全体を見渡した一目でわかる集計値が無かったため追加。"
   },
+  {
+    date: "2026-07-24",
+    author: "Claude",
+    content: "7月度、ホールセールパン・加工肉・フローズン・和日配・洋日配の5BUで何度も同期不具合（レースコンディション・上書き漏れ・実績倍増など、いずれも過去に修正済み）が重なりデータが混乱していたため、この5BUの7月分の実績・計画をローカル・スプレッドシート両方から一旦完全にクリアする処理を追加（初回アクセス時に自動実行）。これにより、修正済みの同期の仕組みの上で、まっさらな状態から入力し直せるようにした。シミュレーションで、対象5BUのみ実績・計画が空になり、スプレッドシートへも正しく送信されることを確認。"
+  },
 ];
 
 function renderChangelog(){
@@ -5579,6 +5584,31 @@ const UPLOADED_ACTUALS_7 = {"ホールセールパン":{"上津役":{"1":{"val":
 
 saveAll();
 lastSelectedMonth=getMonth();
+
+/* 何度もの同期不具合（レースコンディション・上書き漏れ等、いずれも修正済み）で
+   7月度のデータが混乱してしまった5BU（ホールセールパン・加工肉・フローズン・
+   和日配・洋日配）について、実績・計画を一旦完全にクリアし、まっさらな状態から
+   入力し直してもらえるようにする（ローカル・スプレッドシート両方をクリア） */
+(function resetJuly5BUs(){
+  const RESET_VERSION = "1";
+  const verKey = "sbu2_july_5bu_reset_version";
+  if(localStorage.getItem(verKey) === RESET_VERSION) return;
+  const m = 7;
+  const targets = ["ホールセールパン","加工肉","フローズン","和日配","洋日配"];
+
+  targets.forEach(dept=>{
+    ["actuals","plans"].forEach(type=>{
+      const key = sk(dept, type, m);
+      localStorage.setItem(key, "{}");
+    });
+    if(typeof sbuSyncPushDept==="function") sbuSyncPushDept(dept, m);
+  });
+
+  /* 今表示中の月が7月なら、メモリ上のactuals/plansにも反映する */
+  if(getMonth()===7) loadAll();
+
+  localStorage.setItem(verKey, RESET_VERSION);
+})();
 
 sbuSyncInit();
 weatherLoadCache();
