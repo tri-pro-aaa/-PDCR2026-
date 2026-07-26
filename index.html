@@ -2213,12 +2213,36 @@ function sbuSyncStart(){
      フォーム送信（非同期）のためまだサーバーに届いていない可能性がある。
      その状態で即座にPullすると、まだ更新されていない古いスプレッドシートのデータで
      シードしたばかりの正しいローカルデータを上書きしてしまうため、初回のPullだけ
-     少し待ってから実行する（20秒おきの定期実行はこれまで通り） */
-  setTimeout(()=>sbuSyncPullAll(), 5000);
+     少し待ってから実行する（20秒おきの定期実行はこれまで通り）。
+     さらに、定期Pull自体も「送信待ちのキューが残っている間」は見送るようにしている
+     （sbuSyncPullAll側でチェック）ため、複数件を一気に送信するタイミングでも安全 */
+  setTimeout(()=>sbuSyncPullAll(), 8000);
   sbuSyncTimer = setInterval(()=>sbuSyncPullAll(), 20000);
 }
 function sbuSyncStop(){
   if(sbuSyncTimer){ clearInterval(sbuSyncTimer); sbuSyncTimer=null; }
+}
+/* スプレッドシートへの送信をキューで管理し、一定間隔をあけて1件ずつ順番に送信する。
+   起動時のシード処理などで複数BU分（1BUにつきactuals/plansの2件）を一気に呼ぶと、
+   Google Apps Script側のロック待ち（LockService、最大10秒）が渋滞し、
+   20秒おきの定期同期(Pull)のタイミングまでに全件の送信が完了せず、
+   まだ更新されていない古いデータで上書きされてしまう不具合があったため */
+let sbuSyncPushQueue = [];
+let sbuSyncPushBusy = false;
+function sbuSyncPushKey(key, jsonStr){
+  if(!sbuSyncEnabled || !sbuSyncUrl) return;
+  sbuSyncPushQueue.push({key, jsonStr});
+  sbuSyncDrainPushQueue();
+}
+function sbuSyncDrainPushQueue(){
+  if(sbuSyncPushBusy || sbuSyncPushQueue.length===0) return;
+  sbuSyncPushBusy = true;
+  const {key, jsonStr} = sbuSyncPushQueue.shift();
+  sbuSyncDoPushOne(key, jsonStr);
+  setTimeout(()=>{
+    sbuSyncPushBusy = false;
+    sbuSyncDrainPushQueue();
+  }, 700);
 }
 /* 1件のkey/jsonをスプレッドシートへ送信（失敗しても画面操作は止めない） */
 /* 呼び出しごとに使い捨てのiframe・フォームを作成する（Apps Script宛のPOSTが
@@ -2227,7 +2251,7 @@ function sbuSyncStop(){
    1件目の送信がブラウザ内部で処理中のうちに2件目でフォームの中身を書き換えてしまい、
    1件目の内容が2件目の内容で上書きされて送信されてしまう不具合があった。
    そのため呼び出しごとに新しいフォーム／iframeを作り、送信後に破棄する方式に変更した） */
-function sbuSyncPushKey(key, jsonStr){
+function sbuSyncDoPushOne(key, jsonStr){
   if(!sbuSyncEnabled || !sbuSyncUrl) return;
   try{
     const uid = "sbuSyncFrame_" + Date.now() + "_" + Math.random().toString(36).slice(2,8);
@@ -2295,6 +2319,10 @@ function sbuSyncPushAllLocal(){
 /* スプレッドシートから全件取得し、ローカルより新しければ反映 */
 function sbuSyncPullAll(manual){
   if(!sbuSyncUrl || sbuSyncPulling) return;
+  /* 送信キューがまだ処理中の場合、Pullを見送る（まだサーバーに届いていない
+     最新の送信内容を、古いスプレッドシートのデータで上書きしてしまうのを防ぐため）。
+     手動での「今すぐ同期」だけは、ユーザーの明示的な操作なのでこの限りではない */
+  if(!manual && (sbuSyncPushBusy || sbuSyncPushQueue.length>0)) return;
   sbuSyncPulling = true;
   if(manual) sbuSyncSetStatus("同期中…");
 
@@ -3774,6 +3802,11 @@ const CHANGELOG = [
     date: "2026-07-27",
     author: "Claude",
     content: "上記でクリアした5BU（ホールセールパン・加工肉・フローズン・和日配・洋日配）の7月度実績を、正式データ（RESULT_-_2026-07-27T081101_476.CSVより）でUPLOADED_ACTUALS_7に反映。全5BU・6店舗×26日分（7/1〜7/26）、欠損なく反映。役目を終えた前回のクリア処理（resetJuly5BUs）は削除し、ACTUALS_SEED_VERSIONを10に更新して確実に反映されるようにした。"
+  },
+  {
+    date: "2026-07-27",
+    author: "Claude",
+    content: "デプロイ後、5BU分のデータが「一旦表示されるが数十秒後に消える」不具合が発生。原因は、起動時のシード処理で5BU×2種類＝10件のスプレッドシート送信がほぼ同時に発生し、Google Apps Script側のロック待ち（最大10秒）が渋滞して、20秒おきの定期同期（Pull）までに全件の送信完了が間に合わず、まだ更新されていない古いデータで上書きされていたため。①送信をキュー化し700ms間隔で1件ずつ順番に送信する方式に変更、②送信キューが残っている間は定期Pullを見送るようにし（手動の「今すぐ同期」は除く）、根本的にレースが起きないようにした。あわせて初回Pullの待機時間も5秒→8秒に延長。シミュレーションで10件が約700ms間隔・合計6.4秒で順番に送信されることを確認。"
   },
 ];
 
