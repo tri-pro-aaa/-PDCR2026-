@@ -2229,6 +2229,7 @@ function sbuSyncStop(){
    まだ更新されていない古いデータで上書きされてしまう不具合があったため */
 let sbuSyncPushQueue = [];
 let sbuSyncPushBusy = false;
+let sbuSyncLastPushAt = 0; /* 最後にスプレッドシートへ送信した時刻(ms)。この時刻から一定時間はPullを見送る */
 function sbuSyncPushKey(key, jsonStr){
   if(!sbuSyncEnabled || !sbuSyncUrl) return;
   sbuSyncPushQueue.push({key, jsonStr});
@@ -2239,6 +2240,7 @@ function sbuSyncDrainPushQueue(){
   sbuSyncPushBusy = true;
   const {key, jsonStr} = sbuSyncPushQueue.shift();
   sbuSyncDoPushOne(key, jsonStr);
+  sbuSyncLastPushAt = Date.now();
   setTimeout(()=>{
     sbuSyncPushBusy = false;
     sbuSyncDrainPushQueue();
@@ -2319,10 +2321,14 @@ function sbuSyncPushAllLocal(){
 /* スプレッドシートから全件取得し、ローカルより新しければ反映 */
 function sbuSyncPullAll(manual){
   if(!sbuSyncUrl || sbuSyncPulling) return;
-  /* 送信キューがまだ処理中の場合、Pullを見送る（まだサーバーに届いていない
-     最新の送信内容を、古いスプレッドシートのデータで上書きしてしまうのを防ぐため）。
+  /* 送信キューがまだ処理中、または直近30秒以内に送信した場合はPullを見送る。
+     クライアント側の送信自体は数秒で終わっても、Google Apps Script側の書き込み処理
+     （ロック待ち、他の端末からの同時送信との競合）はそれよりずっと時間がかかることがあり、
+     そのタイミングでPullすると、まだ書き込みが完了していない古いデータで
+     上書きしてしまう不具合があったため、十分な安全マージンを取っている。
      手動での「今すぐ同期」だけは、ユーザーの明示的な操作なのでこの限りではない */
-  if(!manual && (sbuSyncPushBusy || sbuSyncPushQueue.length>0)) return;
+  const sincePush = Date.now() - sbuSyncLastPushAt;
+  if(!manual && (sbuSyncPushBusy || sbuSyncPushQueue.length>0 || sincePush<30000)) return;
   sbuSyncPulling = true;
   if(manual) sbuSyncSetStatus("同期中…");
 
@@ -3812,6 +3818,11 @@ const CHANGELOG = [
     date: "2026-07-27",
     author: "Claude",
     content: "上記の送信キュー化修正をデプロイしても、5BUの実績がまだ反映されないケースが発生。原因は、以前バージョン10のシードが（キュー化前の不具合入りの状態で）一度実行済みの端末では、バージョン番号が変わっていないため再シードが走らず、キュー化された新しい送信ロジックの恩恵を受けられていなかったため。ACTUALS_SEED_VERSIONを11に更新し、全端末で確実に再シード・再送信されるようにした。"
+  },
+  {
+    date: "2026-07-27",
+    author: "Claude",
+    content: "バージョン11デプロイ後も、一部BUが「12日分」「9日分」など過去の古いデータに数十秒後に切り替わってしまう不具合が発生。原因は、バージョンアップ直後は複数端末が同時にシード＋送信を行うため、Google Apps Script側の書き込み処理が想定以上に渋滞し、クライアント側の送信キューが数秒で捌けても、サーバー側の実際の書き込み完了はそれよりずっと時間がかかっていたため。「送信キューが空かどうか」ではなく「最後に送信してから30秒経過したか」を判定基準に変更し、送信直後は自動同期（Pull）を一切行わないよう安全マージンを大幅に強化した（手動の「今すぐ同期」は従来通りいつでも実行可）。シミュレーションで、Push直後の自動Pullは見送られ、30秒後には再開されることを確認。"
   },
 ];
 
