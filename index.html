@@ -2985,11 +2985,33 @@ function handleActualFile(file){
   reader.readAsText(file,"utf-8");
 }
 
+/* CSVの1行を正しく分割する。ダブルクォートで囲まれたフィールド内のカンマ（例："224,433"のような
+   桁区切りの数字）を区切り文字として誤認識しないようにする。単純なsplit(",")だと、
+   このようなフィールドが途中で分割されてしまい、実績金額が桁落ちする不具合があった */
+function parseCSVLine(line){
+  const result = [];
+  let cur = "";
+  let inQuotes = false;
+  for(let i=0;i<line.length;i++){
+    const c = line[i];
+    if(c === '"'){
+      if(inQuotes && line[i+1] === '"'){ cur += '"'; i++; }
+      else inQuotes = !inQuotes;
+    } else if(c === ',' && !inQuotes){
+      result.push(cur);
+      cur = "";
+    } else {
+      cur += c;
+    }
+  }
+  result.push(cur);
+  return result.map(s=>s.trim());
+}
 function parseActualCSV(text, fname){
   const lines=text.split(/\r?\n/).filter(l=>l.trim());
   if(lines.length<2) return false;
   /* ヘッダー行を探す */
-  const header=lines[0].split(",").map(h=>h.trim().replace(/"/g,""));
+  const header=parseCSVLine(lines[0]).map(h=>h.replace(/"/g,""));
   const dateIdx=header.findIndex(h=>h==="日付");
   /* 「店舗名」（実績アップロード用の一般的な形式）と「店舗」（このアプリのCSVエクスポート形式）の両方に対応 */
   const storeIdx=header.findIndex(h=>h==="店舗名"||h==="店舗");
@@ -3013,7 +3035,7 @@ function parseActualCSV(text, fname){
      以前は既存のactuals値にも加算していたため、再アップロード時に値が倍増する不具合があった） */
   const newVals = {};
   lines.slice(1).forEach(line=>{
-    const cols=line.split(",").map(c=>c.trim().replace(/"/g,""));
+    const cols=parseCSVLine(line).map(c=>c.replace(/"/g,""));
     const dateStr=cols[dateIdx]||"";
     const store=cols[storeIdx]||"";
     const rawDiv=cols[divIdx]||"";
@@ -3833,6 +3855,11 @@ const CHANGELOG = [
     date: "2026-07-27",
     author: "Claude",
     content: "上記の反映後も「入力した実績が消える」事象が続いたため、根本原因を再調査。原因は、7月度の5BU強制上書きシード機能そのものにあった：バージョン番号を上げるたびに、まだそのバージョンを経験していない端末（新しい端末・キャッシュクリア後の端末など）がアクセスする度に発火し、その時点でスプレッドシートに入っている最新の手入力データを、古いCSVスナップショットの値で問答無用に上書きしてしまう仕組みになっていた。既にスプレッドシート側には正しいベースラインのデータが入っているため、この強制上書き処理を完全に無効化し、以降は通常の同期（Pull/Push）だけでデータを維持するように変更。これにより、今後は手入力・修正した内容が古いスナップショットで巻き戻されることはなくなる。"
+  },
+  {
+    date: "2026-07-27",
+    author: "Claude",
+    content: "設定タブの「実績アップロード」で、金額が桁区切りカンマ付きでダブルクォート囲み（例：\\\"224,433\\\"）のCSVをアップロードすると、実績が0円として登録されてしまう不具合を修正。原因はCSVの行分割が単純なsplit(\\\",\\\")だったため、クォート内のカンマも区切り文字として誤認識し、金額が上位桁だけに分断された結果、小さな数値になり千円換算（÷1000）で0に丸められていた。クォート内のカンマを区切り文字として扱わない正しいCSV行分割関数（parseCSVLine）を実装し、ヘッダー・データ行の両方で使用するよう修正。シミュレーションで実際のファイル（810行）を読み込み、正しい金額（例：224,433円→224千円）が反映されることを確認。"
   },
 ];
 
