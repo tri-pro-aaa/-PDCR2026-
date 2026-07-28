@@ -3861,6 +3861,11 @@ const CHANGELOG = [
     author: "Claude",
     content: "設定タブの「実績アップロード」で、金額が桁区切りカンマ付きでダブルクォート囲み（例：\\\"224,433\\\"）のCSVをアップロードすると、実績が0円として登録されてしまう不具合を修正。原因はCSVの行分割が単純なsplit(\\\",\\\")だったため、クォート内のカンマも区切り文字として誤認識し、金額が上位桁だけに分断された結果、小さな数値になり千円換算（÷1000）で0に丸められていた。クォート内のカンマを区切り文字として扱わない正しいCSV行分割関数（parseCSVLine）を実装し、ヘッダー・データ行の両方で使用するよう修正。シミュレーションで実際のファイル（810行）を読み込み、正しい金額（例：224,433円→224千円）が反映されることを確認。"
   },
+  {
+    date: "2026-07-27",
+    author: "Claude",
+    content: "BU個別ページのKPIカードで、「計画比」ラベルなのに実際は予算比（実績÷予算）が計算されていた不具合を修正。予算比（実績÷予算）と計画比（実績÷計画）を別々のカードに分離した。あわせて、各KPIカードに金額差異を追加：予算比→予算差、計画比→計画差（達成/未達バッジは維持）、昨年比→昨年差、計画予算比→計画－予算、計画昨対比→計画－昨年実績。"
+  },
 ];
 
 function renderChangelog(){
@@ -5177,6 +5182,13 @@ function renderDeptKPI(dept){
     tp+=sumP(dept,s,ad)||0;
   });
   const r=tc&&tb?ta/tb:null,lr=tc&&tl?ta/tl:null;
+  /* 「計画比」は本来、実績÷計画で計算すべき指標。計画(tp)が未入力の場合は予算にフォールバックする */
+  const planBase = tp>0 ? tp : tb;
+  const rp=tc&&planBase?ta/planBase:null;
+  /* 各指標の金額差異 */
+  const budgetDiff = tc ? ta-tb : null;
+  const planDiff    = tc ? ta-planBase : null;
+  const lyDiff       = tc ? ta-tl : null;
   /* 計画予算比・計画昨対比は実績の有無に関係ない指標（計画と予算/昨年実績を比べるだけ）なので、
      進捗日数ではなく月全体(allD)で計算する。進捗分(ad)で計算すると、実績未入力の週の計画が
      反映されず、比率が不自然に偏ってしまうため */
@@ -5188,6 +5200,8 @@ function renderDeptKPI(dept){
   });
   const pbr=ftp&&ftb?ftp/ftb:null;   /* 計画予算比 */
   const plyr=ftp&&ftl?ftp/ftl:null;  /* 計画昨対比 */
+  const pbDiff = tp ? ftp-ftb : null;  /* 計画－予算 */
+  const plyDiff = tp ? ftp-ftl : null; /* 計画－昨年実績 */
   const el=document.getElementById(`kpi-${dept}`);
   if(!el) return;
   const noUploadBadge=hasUpload?"":`<span style="font-size:10px;background:#fff8e1;color:#e65100;padding:2px 8px;border-radius:10px;border:0.5px solid #ffe082;margin-left:6px">予算未登録</span>`;
@@ -5198,18 +5212,21 @@ function renderDeptKPI(dept){
     <div class="kpi"><div class="kpi-label">実績</div>
       <div class="kpi-val ${rc(r)}">${f(tc?ta:null)}</div>
       <div class="kpi-sub">${progressLabel}</div></div>
-    <div class="kpi"><div class="kpi-label">計画比</div>
+    <div class="kpi"><div class="kpi-label">予算比</div>
       <div class="kpi-val ${rc(r)}">${hasUpload?fr(r):'—'}</div>
-      <div class="kpi-sub">${r!=null&&hasUpload?`<span class="badge badge-${rc(r)}">${r>=1?"達成":"未達"}</span>`:""}</div></div>
+      <div class="kpi-sub">${budgetDiff!=null&&hasUpload?`予算差 <span class="${dc(budgetDiff)}">${fd(budgetDiff)}</span>`:""}</div></div>
+    <div class="kpi"><div class="kpi-label">計画比</div>
+      <div class="kpi-val ${rc(rp)}">${hasUpload?fr(rp):'—'}</div>
+      <div class="kpi-sub">${rp!=null&&hasUpload?`<span class="badge badge-${rc(rp)}">${rp>=1?"達成":"未達"}</span> `:""}${planDiff!=null&&hasUpload?`計画差 <span class="${dc(planDiff)}">${fd(planDiff)}</span>`:""}</div></div>
     <div class="kpi"><div class="kpi-label">昨年比</div>
       <div class="kpi-val ${rc(lr)}">${hasUpload?fr(lr):'—'}</div>
-      <div class="kpi-sub">対昨年実績</div></div>
+      <div class="kpi-sub">${lyDiff!=null&&hasUpload?`昨年差 <span class="${dc(lyDiff)}">${fd(lyDiff)}</span>`:"対昨年実績"}</div></div>
     <div class="kpi"><div class="kpi-label" style="color:#6a1b9a">計画予算比</div>
       <div class="kpi-val ${rc(pbr)}" style="${pbr==null?'color:#aaa':''}">${tp?fr(pbr):'—'}</div>
-      <div class="kpi-sub">計画÷予算</div></div>
+      <div class="kpi-sub">${pbDiff!=null&&tp?`計画－予算 <span class="${dc(pbDiff)}">${fd(pbDiff)}</span>`:"計画÷予算"}</div></div>
     <div class="kpi"><div class="kpi-label" style="color:#6a1b9a">計画昨対比</div>
       <div class="kpi-val ${rc(plyr)}" style="${plyr==null?'color:#aaa':''}">${tp?fr(plyr):'—'}</div>
-      <div class="kpi-sub">計画÷昨年実績</div></div>`;
+      <div class="kpi-sub">${plyDiff!=null&&tp?`計画－昨年実績 <span class="${dc(plyDiff)}">${fd(plyDiff)}</span>`:"計画÷昨年実績"}</div></div>`;
   const lbl=document.getElementById(`dept-month-lbl-${dept}`);
   if(lbl) lbl.textContent=`2026年${m}月`;
 }
