@@ -350,7 +350,7 @@ input.pi:focus{outline:none;border-color:#9c27b0;background:#fff}
   <div class="nav-right">
     <select id="sel-month" class="sm" onchange="onMonthChange()" style="background:transparent;color:#9bb5d0;border-color:#2d5a8e">
       <option value="6">2026年6月</option>
-      <option value="7" selected>2026年7月</option>
+      <option value="7">2026年7月</option>
       <option value="8">2026年8月</option>
     </select>
     <span class="save-badge" id="save-badge">保存済み</span>
@@ -3866,6 +3866,11 @@ const CHANGELOG = [
     author: "Claude",
     content: "BU個別ページのKPIカードで、「計画比」ラベルなのに実際は予算比（実績÷予算）が計算されていた不具合を修正。予算比（実績÷予算）と計画比（実績÷計画）を別々のカードに分離した。あわせて、各KPIカードに金額差異を追加：予算比→予算差、計画比→計画差（達成/未達バッジは維持）、昨年比→昨年差、計画予算比→計画－予算、計画昨対比→計画－昨年実績。"
   },
+  {
+    date: "2026-08-04",
+    author: "Claude",
+    content: "8月に入力した実績が数秒〜数十秒後に消えたように見える不具合を調査した結果、スプレッドシート側にはデータが正しく保存されており、原因は同期ではなく月選択（sel-month）のデフォルトが「7月」でHTMLにハードコードされていたことと判明。何らかの理由で画面が再読み込みされるたびに7月表示へ戻ってしまい、8月ページに入力したデータが（7月の画面には当然映らないため）「消えた」ように見えていた。ハードコードされたデフォルトを削除し、起動時に今日の実際の日付に基づいて対象月（6・7・8月）を自動選択するよう変更（対象月の範囲外の場合は、未来なら一番新しい対象月、過去なら一番古い対象月にフォールバック）。シミュレーションで各ケースが正しく判定されることを確認。"
+  },
 ];
 
 function renderChangelog(){
@@ -5516,6 +5521,25 @@ function renderDeptTable(dept){
 const DATA_VERSION = "3"; /* 予算データ更新のたびにこの番号を上げる */
 const now=new Date();
 document.getElementById("today-lbl").textContent=`${now.getMonth()+1}/${now.getDate()}（${DOW[now.getDay()]}）`;
+
+/* ページを開いた時、今日の実際の日付に基づいて対象月を自動選択する。
+   以前は「7月」がHTML側にハードコードされたデフォルトになっており、
+   何らかの理由で画面が再読み込みされるたびに7月へ戻ってしまい、
+   8月に入力したデータが「消えた」ように見える不具合の原因になっていた。
+   対象月（SBU_SYNC_MONTHSと同じ6,7,8）の範囲外の場合は、
+   未来なら一番新しい対象月、過去なら一番古い対象月にフォールバックする */
+(function setDefaultMonth(){
+  const y = now.getFullYear();
+  const m = now.getMonth()+1;
+  const validMonths = [6,7,8];
+  let target;
+  if(y===2026 && validMonths.includes(m)) target = m;
+  else if(y>2026 || (y===2026 && m>8)) target = 8;
+  else target = 6;
+  const sel = document.getElementById("sel-month");
+  if(sel) sel.value = String(target);
+})();
+
 updateUISelects();
 initActuals();
 
