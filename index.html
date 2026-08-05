@@ -3886,6 +3886,11 @@ const CHANGELOG = [
     author: "Claude",
     content: "「フローズン」BUを「冷凍食品・アイス」に改称（DEPTS・DEPT_TO_BU・BU_ICONS・SCC_BU_MERGE_MAP・各月の予算/実績データ・HTMLのpage-dept divを一括更新。DEPT_TO_BUには新しいライン名「冷凍食品」「アイス」も追加登録）。あわせて、8月3日・4日の2日間の実績（RESULT_-_2026-08-05T132333_876.CSVより）を、洋日配・ホールセールパン・和日配・冷凍食品・アイス・加工肉の5BUに反映。UPLOADED_ACTUALS_8_NEWBUと安全な初回投入処理（seedNewBuActuals8）の対象BUにこの5つを追加し、バージョンを2に更新。シミュレーションで全10BUへの反映・送信を確認。"
   },
+  {
+    date: "2026-08-05",
+    author: "Claude",
+    content: "週次サマリーテーブル（BU個別ページの週別表）の「予算」「昨年実績」「計画」列が、実績の有無に関係ない金額表示のはずが、進捗ベース（実績入力済みの日数分だけ）で計算されてしまっており、実績が一部の日にしか無い週で予算が不自然に小さく表示される不具合を修正（例：冷凍食品・アイスの2週目で、正しくは14,842千円のところ、3・4日目の予算合計3,754千円しか表示されていなかった）。calcRow・calcTotalの両関数で、予算・昨年実績・計画の金額は期間全体(fullDs)、実績・各種比率は進捗ベース(ds)のまま、と役割を分離。シミュレーションで正しい金額（14,842千円）が返ることを確認。"
+  },
 ];
 
 function renderChangelog(){
@@ -5131,35 +5136,35 @@ function renderDeptWeekSummary(dept){
      dsではなくfullDs（週や月の全日程）で計算する。省略時はdsをそのまま使う */
   function calcRow(s,ds,fullDs){
     fullDs = fullDs || ds;
-    const b=sumB(dept,s,ds), p=sumP(dept,s,ds), a=sumA(dept,s,ds);
+    /* 予算・計画・昨年実績の「金額」表示は実績の有無に関係なく期間全体(fullDs)で計算する。
+       進捗分(ds)だけで計算すると、実績が一部の日にしか入っていない週で
+       「予算」自体が不自然に小さく表示されてしまう不具合があったため */
+    const b=sumB(dept,s,fullDs), p=sumP(dept,s,fullDs), a=sumA(dept,s,ds);
     const r=ratioW(dept,s,ds);
     const br=a!=null&&b?a/b:null;
-    const ly=sumL(dept,s,ds), lyr=a!=null&&ly?a/ly:null;
-    const fb=sumB(dept,s,fullDs), fp=sumP(dept,s,fullDs), fly=sumL(dept,s,fullDs);
-    const pbr=fp!=null&&fb?fp/fb:null;
-    const plyr=fp!=null&&fly?fp/fly:null;
+    const ly=sumL(dept,s,fullDs), lyr=a!=null&&ly?a/ly:null;
+    const pbr=p!=null&&b?p/b:null;
+    const plyr=p!=null&&ly?p/ly:null;
     return {budget:b, lyRaw:ly, plan:p, actual:a, budgetRatio:br, planRatio:r, lyRatio:lyr, planBudgetRatio:pbr, planLyRatio:plyr};
   }
   function calcTotal(ds,fullDs){
     fullDs = fullDs || ds;
-    let tb=0,tp=0,ta=0,tl=0,hasTa=false;
+    let ta=0,hasTa=false;
     stores.forEach(s=>{
-      tb+=sumB(dept,s,ds)||0;
-      tp+=sumP(dept,s,ds)||0;
       const a=sumA(dept,s,ds); if(a!=null){ta+=a;hasTa=true;}
-      tl+=sumL(dept,s,ds)||0;
+    });
+    /* 予算・計画・昨年実績の「金額」表示は期間全体(fullDs)で計算する（上記calcRowと同じ理由） */
+    let tb=0,tp=0,tl=0;
+    stores.forEach(s=>{
+      tb+=sumB(dept,s,fullDs)||0;
+      tp+=sumP(dept,s,fullDs)||0;
+      tl+=sumL(dept,s,fullDs)||0;
     });
     const r=hasTa&&tp?ta/tp:null;
     const br=hasTa&&tb?ta/tb:null;
     const lyr=hasTa&&tl?ta/tl:null;
-    let ftb=0,ftp=0,ftl=0;
-    stores.forEach(s=>{
-      ftb+=sumB(dept,s,fullDs)||0;
-      ftp+=sumP(dept,s,fullDs)||0;
-      ftl+=sumL(dept,s,fullDs)||0;
-    });
-    const pbr=ftp&&ftb?ftp/ftb:null;
-    const plyr=ftp&&ftl?ftp/ftl:null;
+    const pbr=tp&&tb?tp/tb:null;
+    const plyr=tp&&tl?tp/tl:null;
     return {budget:tb, lyRaw:tl, plan:tp, actual:hasTa?ta:null, budgetRatio:br, planRatio:r, lyRatio:lyr, planBudgetRatio:pbr, planLyRatio:plyr};
   }
   function cellHtml(row,key){
