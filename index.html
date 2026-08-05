@@ -3891,6 +3891,11 @@ const CHANGELOG = [
     author: "Claude",
     content: "週次サマリーテーブル（BU個別ページの週別表）の「予算」「昨年実績」「計画」列が、実績の有無に関係ない金額表示のはずが、進捗ベース（実績入力済みの日数分だけ）で計算されてしまっており、実績が一部の日にしか無い週で予算が不自然に小さく表示される不具合を修正（例：冷凍食品・アイスの2週目で、正しくは14,842千円のところ、3・4日目の予算合計3,754千円しか表示されていなかった）。calcRow・calcTotalの両関数で、予算・昨年実績・計画の金額は期間全体(fullDs)、実績・各種比率は進捗ベース(ds)のまま、と役割を分離。シミュレーションで正しい金額（14,842千円）が返ることを確認。"
   },
+  {
+    date: "2026-08-05",
+    author: "Claude",
+    content: "BU再編（ハード→カルチャー、カルチャー・ペット→ペット、ウェア→レディース・メンズ、グッズ・ワーク→シューズ・服飾、フローズン→冷凍食品・アイス）の際、localStorageの保存キーがBU名を含む仕様のため、旧BU名で入力済みだった実績・計画・週次コメントが新BU名側から見えなくなっていた不具合を修正（冷凍食品・アイスで、8/1・8/2の実績が反映されない、以前入力していた計画が消えたように見える、として発覚）。以前「ヘルス→ビューティ・ヘルス」改称時に使った移行処理（migrateDeptRename）を、今回のBU再編分も含めるよう拡張し、バージョンを2に更新。UPLOADED_ACTUALS_8_NEWBU等の自動投入で新BU名側に既にデータがあるケースを考慮し、単純な「新キーが空なら丸ごとコピー」ではなく、店舗・日付単位でマージ（新キー側に無い日だけ旧キーの値で補完、新キー側の既存値は上書きしない）する方式に強化。シミュレーションで、既存の新BUデータを保持したまま旧BUデータが正しく補完されることを確認。"
+  },
 ];
 
 function renderChangelog(){
@@ -5630,18 +5635,43 @@ initActuals();
    新キーにまだ存在しない場合だけコピーする（既に新キーで入力済みのデータを上書きしない）。
    コピーしたデータはスプレッドシートへも送り直し、他端末にも引き継がれるようにする */
 (function migrateDeptRename(){
-  const RENAME_VERSION = "1";
+  const RENAME_VERSION = "2";
   const verKey = "sbu2_dept_rename_version";
   if(localStorage.getItem(verKey) === RENAME_VERSION) return;
-  const RENAME_MAP = { "ヘルス": "ビューティ・ヘルス" };
+  /* BU再編（2026-08-04〜05）に伴い、旧BU名で保存されていた実績・計画・週次コメントを
+     新BU名のキーへ移行する。UPLOADED_ACTUALS_8_NEWBU等による自動投入で新BU名側に
+     既にデータが存在するケースがあるため、単純な「新キーが空なら丸ごとコピー」ではなく、
+     店舗・日付単位でマージし、新キー側に無い日だけ旧キーの値で補完する（新キー側の値は上書きしない） */
+  const RENAME_MAP = {
+    "ヘルス": "ビューティ・ヘルス",
+    "ハード": "カルチャー",
+    "カルチャー・ペット": "ペット",
+    "ウェア": "レディース・メンズ",
+    "グッズ・ワーク": "シューズ・服飾",
+    "フローズン": "冷凍食品・アイス",
+  };
   Object.entries(RENAME_MAP).forEach(([oldName,newName])=>{
     SBU_SYNC_MONTHS.forEach(m=>{
       ["actuals","plans"].forEach(type=>{
         const oldKey=`sbu2_${oldName}_${m}_${type}`, newKey=`sbu2_${newName}_${m}_${type}`;
-        const oldVal=localStorage.getItem(oldKey);
-        if(oldVal!=null && localStorage.getItem(newKey)==null){
-          localStorage.setItem(newKey, oldVal);
-          if(typeof sbuSyncPushKey==="function") sbuSyncPushKey(newKey, oldVal);
+        const oldRaw=localStorage.getItem(oldKey);
+        if(!oldRaw) return;
+        let oldObj={}; try{ oldObj=JSON.parse(oldRaw); }catch(e){ return; }
+        let newObj={}; try{ newObj=JSON.parse(localStorage.getItem(newKey)||"{}"); }catch(e){ newObj={}; }
+        let changed=false;
+        Object.entries(oldObj).forEach(([store, days])=>{
+          if(!newObj[store]) newObj[store]={};
+          Object.entries(days).forEach(([day, val])=>{
+            if(newObj[store][day]==null){
+              newObj[store][day]=val;
+              changed=true;
+            }
+          });
+        });
+        if(changed){
+          const newJson=JSON.stringify(newObj);
+          localStorage.setItem(newKey, newJson);
+          if(typeof sbuSyncPushKey==="function") sbuSyncPushKey(newKey, newJson);
         }
       });
       getWeeks(m).forEach((_,wi)=>{
