@@ -2201,27 +2201,27 @@ function sbuSyncUpdateToggleBtn(){
 }
 function sbuSyncStart(){
   sbuSyncStop();
-  /* ページ読み込み直後は、seedActualData等によるスプレッドシートへの送信(Push)が
-     フォーム送信（非同期）のためまだサーバーに届いていない可能性がある。
-     その状態で即座にPullすると、まだ更新されていない古いスプレッドシートのデータで
-     シードしたばかりの正しいローカルデータを上書きしてしまうため、初回のPullだけ
-     少し待ってから実行する（20秒おきの定期実行はこれまで通り）。
-     さらに、定期Pull自体も「送信待ちのキューが残っている間」は見送るようにしている
-     （sbuSyncPullAll側でチェック）ため、複数件を一気に送信するタイミングでも安全 */
-  setTimeout(()=>sbuSyncPullAll(), 8000);
+  /* 以前は「Pushがサーバーに届くまで何秒待てば安全か」を当てずっぽうで決めていたが、
+     Push完了はiframeのonloadで確実に検知できるようになったため、
+     Pull側は「送信キューが空になっているか」だけを見れば安全になった
+     （sbuSyncPullAll側でチェック）。ここでの待ち時間は、初期表示直後の
+     連続処理が落ち着くための短いマージンで十分 */
+  setTimeout(()=>sbuSyncPullAll(), 1000);
   sbuSyncTimer = setInterval(()=>sbuSyncPullAll(), 20000);
 }
 function sbuSyncStop(){
   if(sbuSyncTimer){ clearInterval(sbuSyncTimer); sbuSyncTimer=null; }
 }
-/* スプレッドシートへの送信をキューで管理し、一定間隔をあけて1件ずつ順番に送信する。
-   起動時のシード処理などで複数BU分（1BUにつきactuals/plansの2件）を一気に呼ぶと、
-   Google Apps Script側のロック待ち（LockService、最大10秒）が渋滞し、
-   20秒おきの定期同期(Pull)のタイミングまでに全件の送信が完了せず、
-   まだ更新されていない古いデータで上書きされてしまう不具合があったため */
+/* スプレッドシートへの送信をキューで管理し、1件ずつ順番に送信する。
+   以前は「1件あたり0.7秒待てば送信が終わっているはず」という当てずっぽうの
+   固定時間で次の送信に進んでいたが、実際にサーバー側の処理（LockServiceの
+   ロック待ちなど）がそれより長くかかることがあり、まだ書き込みが完了していない
+   状態で次のPullが走って古いデータで上書きしてしまう不具合の原因になっていた。
+   今はiframeのonload（＝GAS側のdoPostがレスポンスを返した時点）を実際に
+   検知してから次の送信に進むため、当てずっぽうの待ち時間が不要になった */
 let sbuSyncPushQueue = [];
 let sbuSyncPushBusy = false;
-let sbuSyncLastPushAt = 0; /* 最後にスプレッドシートへ送信した時刻(ms)。この時刻から一定時間はPullを見送る */
+let sbuSyncLastPushAt = 0; /* 直近で送信が完了(onload検知)した時刻(ms) */
 function sbuSyncPushKey(key, jsonStr){
   if(!sbuSyncEnabled || !sbuSyncUrl) return;
   sbuSyncPushQueue.push({key, jsonStr});
@@ -2231,22 +2231,20 @@ function sbuSyncDrainPushQueue(){
   if(sbuSyncPushBusy || sbuSyncPushQueue.length===0) return;
   sbuSyncPushBusy = true;
   const {key, jsonStr} = sbuSyncPushQueue.shift();
-  sbuSyncDoPushOne(key, jsonStr);
-  sbuSyncLastPushAt = Date.now();
-  setTimeout(()=>{
+  sbuSyncDoPushOne(key, jsonStr, ()=>{
     sbuSyncPushBusy = false;
     sbuSyncDrainPushQueue();
-  }, 700);
+  });
 }
-/* 1件のkey/jsonをスプレッドシートへ送信（失敗しても画面操作は止めない） */
-/* 呼び出しごとに使い捨てのiframe・フォームを作成する（Apps Script宛のPOSTが
+/* 1件のkey/jsonをスプレッドシートへ送信する。
+   呼び出しごとに使い捨てのiframe・フォームを作成する（Apps Script宛のPOSTが
    リダイレクトでGETに化けてしまう問題を避けるため、fetch()ではなくフォーム送信を使う。
-   以前は隠しフォームを使い回していたが、actuals→plansと連続送信した際に
-   1件目の送信がブラウザ内部で処理中のうちに2件目でフォームの中身を書き換えてしまい、
-   1件目の内容が2件目の内容で上書きされて送信されてしまう不具合があった。
-   そのため呼び出しごとに新しいフォーム／iframeを作り、送信後に破棄する方式に変更した） */
-function sbuSyncDoPushOne(key, jsonStr){
-  if(!sbuSyncEnabled || !sbuSyncUrl) return;
+   複数件を連続送信してもフォームの中身を使い回さないよう、毎回新しいフォーム／iframeを
+   作り、送信後に破棄する）。
+   onSettledは、onload検知（成功）またはタイムアウト（失敗）のいずれかが確定した時点で
+   必ず1回呼ばれ、キューの次の送信に進むための合図として使う */
+function sbuSyncDoPushOne(key, jsonStr, onSettled){
+  if(!sbuSyncEnabled || !sbuSyncUrl){ if(onSettled) onSettled(); return; }
   try{
     const uid = "sbuSyncFrame_" + Date.now() + "_" + Math.random().toString(36).slice(2,8);
     const frame = document.createElement("iframe");
@@ -2267,16 +2265,40 @@ function sbuSyncDoPushOne(key, jsonStr){
     form.appendChild(jsonInput);
     document.body.appendChild(form);
 
-    form.submit();
-    sbuSyncSetStatus("送信済み："+new Date().toLocaleTimeString());
+    let settled = false;
+    const cleanup = ()=>{
+      setTimeout(()=>{
+        if(form.parentNode) form.parentNode.removeChild(form);
+        if(frame.parentNode) frame.parentNode.removeChild(frame);
+      }, 500);
+    };
+    const finish = (ok)=>{
+      if(settled) return;
+      settled = true;
+      clearTimeout(timeoutId);
+      if(ok){
+        sbuSyncLastPushAt = Date.now();
+        sbuSyncSetStatus("送信完了："+new Date().toLocaleTimeString());
+      } else {
+        /* onloadが検知できなかった場合（回線切断など）は書き込みが本当に
+           終わっているか分からないため、失われないよう再送キューの先頭に戻す */
+        sbuSyncPushQueue.unshift({key, jsonStr});
+        sbuSyncSetStatus("⚠ 送信の完了確認ができませんでした（再送します）");
+      }
+      cleanup();
+      if(onSettled) onSettled();
+    };
+    /* iframeのonloadは、GAS側のdoPostがレスポンスを返した時点で発火する。
+       これにより「何秒待てば届いているはず」という当てずっぽうを排除できる */
+    frame.onload = ()=> finish(true);
+    /* 万一onloadが発火しない場合の保険（通常はここに来ない想定） */
+    const timeoutId = setTimeout(()=> finish(false), 20000);
 
-    /* 送信完了を待ってから後片付け（十分な余裕を持たせて削除） */
-    setTimeout(()=>{
-      if(form.parentNode) form.parentNode.removeChild(form);
-      if(frame.parentNode) frame.parentNode.removeChild(frame);
-    }, 15000);
+    form.submit();
+    sbuSyncSetStatus("送信中…");
   }catch(e){
     sbuSyncSetStatus("⚠ 送信失敗（通信環境を確認してください）");
+    if(onSettled) onSettled();
   }
 }
 /* 指定BU・月の実績/計画をまとめて送信 */
@@ -2313,14 +2335,11 @@ function sbuSyncPushAllLocal(){
 /* スプレッドシートから全件取得し、ローカルより新しければ反映 */
 function sbuSyncPullAll(manual, onDone){
   if(!sbuSyncUrl || sbuSyncPulling){ if(onDone) onDone(false); return; }
-  /* 送信キューがまだ処理中、または直近30秒以内に送信した場合はPullを見送る。
-     クライアント側の送信自体は数秒で終わっても、Google Apps Script側の書き込み処理
-     （ロック待ち、他の端末からの同時送信との競合）はそれよりずっと時間がかかることがあり、
-     そのタイミングでPullすると、まだ書き込みが完了していない古いデータで
-     上書きしてしまう不具合があったため、十分な安全マージンを取っている。
-     手動での「今すぐ同期」だけは、ユーザーの明示的な操作なのでこの限りではない */
-  const sincePush = Date.now() - sbuSyncLastPushAt;
-  if(!manual && (sbuSyncPushBusy || sbuSyncPushQueue.length>0 || sincePush<30000)){ if(onDone) onDone(false); return; }
+  /* 送信キューがまだ処理中の間だけPullを見送る。以前は「送信後30秒は待つ」という
+     当てずっぽうの猶予も設けていたが、Push完了はiframeのonloadで確実に検知できる
+     ようになった（sbuSyncDoPushOne参照）ため、キューが空＝全件書き込み完了とみなせる。
+     手動での「今すぐ同期」は、ユーザーの明示的な操作なのでこの限りではない */
+  if(!manual && (sbuSyncPushBusy || sbuSyncPushQueue.length>0)){ if(onDone) onDone(false); return; }
   sbuSyncPulling = true;
   if(manual) sbuSyncSetStatus("同期中…");
 
@@ -4001,6 +4020,11 @@ const CHANGELOG = [
     date: "2026-09-09",
     author: "Claude",
     content: "低温5BU（洋日配・和日配・ホールセールパン・冷凍食品&アイス・加工肉）の9月6日〜8日分実績（RESULT_-_2026-09-09T082238_018.CSVより、この5BUのみ・3日分のデータ）を反映。丸め誤差調整も適用。UPLOADED_ACTUALS_9にマージし、seedNewBuActuals9のバージョンを2に更新。5BUとも9月8日分まで揃った。"
+  },
+  {
+    date: "2026-09-13",
+    author: "Claude",
+    content: "低温5BU（ホールセールパン・加工肉・冷凍食品&アイス・洋日配・和日配）を含む同期エンジン全体を簡素化。以前は送信(Push)完了を「何秒待てば届いているはず」という当てずっぽうの固定時間で判断しており、実際の書き込み完了とズレることで他端末の入力を上書きする不具合の温床になっていた。今回、送信に使うiframeのonloadイベント（GAS側のdoPostがレスポンスを返した時点）で送信完了を確実に検知するよう変更し、①1件ごとの固定待ち時間（0.7秒）、②起動直後の固定待ち時間（8秒）、③送信後30秒はPullを見送る猶予、という3つの当てずっぽうの待ち時間ロジックをすべて撤廃。かわりに「送信キューが空になっている＝全件書き込み完了」という確実な条件だけでPullの可否を判定するよう再構成した。onloadが検知できなかった場合（回線切断等）は書き込みが完了したか不明なため、そのキーを再送キューの先頭に戻して失われないようにした。"
   },
 ];
 
