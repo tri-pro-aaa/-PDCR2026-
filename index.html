@@ -4048,6 +4048,11 @@ const CHANGELOG = [
   {
     date: "2026-09-13",
     author: "Claude",
+    content: "上記のDEPT_TO_BU修正（生活消耗・ビューティ・ヘルスの部門境界変更）が、実際の画面には反映されていない不具合を修正。原因は、各端末のlocalStorageに9月1日〜12日分の実績が既に保存済みのため、seedNewBuActuals9の「まだ入力されていない日にだけ追加する」安全設計により、UPLOADED_ACTUALS_9側を直しても既存のlocalStorage値が上書きされていなかったこと（fixAug1to9DataErrorと同種の不具合）。対処として、生活消耗・ビューティ・ヘルスの9月6日〜9月12日分に限り、既存値の保護を行わず強制的にUPLOADED_ACTUALS_9の値で上書きするfixSep6to12DeptMappingError関数を追加し、起動シーケンス（Pull完了後）に組み込んだ。"
+  },
+  {
+    date: "2026-09-13",
+    author: "Claude",
     content: "低温5BU（ホールセールパン・加工肉・冷凍食品&アイス・洋日配・和日配）を含む同期エンジン全体を簡素化。以前は送信(Push)完了を「何秒待てば届いているはず」という当てずっぽうの固定時間で判断しており、実際の書き込み完了とズレることで他端末の入力を上書きする不具合の温床になっていた。今回、送信に使うiframeのonloadイベント（GAS側のdoPostがレスポンスを返した時点）で送信完了を確実に検知するよう変更し、①1件ごとの固定待ち時間（0.7秒）、②起動直後の固定待ち時間（8秒）、③送信後30秒はPullを見送る猶予、という3つの当てずっぽうの待ち時間ロジックをすべて撤廃。かわりに「送信キューが空になっている＝全件書き込み完了」という確実な条件だけでPullの可否を判定するよう再構成した。onloadが検知できなかった場合（回線切断等）は書き込みが完了したか不明なため、そのキーを再送キューの先頭に戻して失われないようにした。"
   },
 ];
@@ -6091,6 +6096,48 @@ function fixAug1to9DataError(){
 }
 
 /* 同期のUI表示だけ先に初期化する（Pull開始はまだしない） */
+
+/* 2026-09-13: DEPT_TO_BUの部門マッピング修正（洗面浴用用品・ヘアケア・ヘアカラー・
+   メンズビューティー等を生活消耗からビューティ・ヘルスへ移動）により、
+   UPLOADED_ACTUALS_9の生活消耗・ビューティ・ヘルスの値を修正したが、
+   各端末のlocalStorageには修正前の値が既に入力済みとして保存されているため、
+   通常のseedNewBuActuals9（「まだ入力されていない日にだけ追加する」安全設計）
+   では上書きされず、修正が反映されない不具合があった。
+   fixAug1to9DataErrorと同様、これは「入力ミスの訂正」にあたるため、
+   対象BU・対象日に限り既存値の保護をせず強制的に上書きする。
+   [重要] この関数もPull完了後にのみ呼び出すこと */
+function fixSep6to12DeptMappingError(){
+  const FIX_VERSION = "1";
+  const verKey = "sbu2_sep6_12_deptmap_fix_version";
+  if(localStorage.getItem(verKey) === FIX_VERSION) return;
+  const m = 9;
+  const targets = ["生活消耗","ビューティ・ヘルス"];
+  const fixDays = ["6","7","8","9","10","11","12"];
+  targets.forEach(dept=>{
+    const seedData = UPLOADED_ACTUALS_9[dept];
+    if(!seedData) return;
+    const key = sk(dept, "actuals", m);
+    let existing = {};
+    try{ existing = JSON.parse(localStorage.getItem(key) || "{}"); }catch(e){ existing = {}; }
+    let changed = false;
+    Object.entries(seedData).forEach(([store, days])=>{
+      if(!existing[store]) existing[store] = {};
+      fixDays.forEach(day=>{
+        if(days[day] !== undefined){
+          existing[store][day] = days[day];
+          changed = true;
+        }
+      });
+    });
+    if(changed){
+      localStorage.setItem(key, JSON.stringify(existing));
+      if(typeof sbuSyncPushDept==="function") sbuSyncPushDept(dept, m);
+    }
+  });
+  if(getMonth()===9) loadAll();
+  localStorage.setItem(verKey, FIX_VERSION);
+}
+
 {
   const input = document.getElementById("sbu-sync-url");
   if(input) input.value = sbuSyncUrl;
@@ -6110,12 +6157,14 @@ if(sbuSyncUrl && sbuSyncEnabled){
     seedNewBuActuals8();
     fixAug1to9DataError();
     seedNewBuActuals9();
+    fixSep6to12DeptMappingError();
     sbuSyncStart();
   });
 } else {
   seedNewBuActuals8();
   fixAug1to9DataError();
   seedNewBuActuals9();
+  fixSep6to12DeptMappingError();
   if(sbuSyncUrl) sbuSyncSetStatus("同期はOFFです");
 }
 
