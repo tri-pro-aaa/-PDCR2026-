@@ -4085,6 +4085,11 @@ const CHANGELOG = [
     author: "Claude",
     content: "9月13日分の部門名列付き実績CSV（RESULT_-_2026-09-14T103040_942.CSVより）を、確定済みのDEPT_TO_BUで全16BU×6店舗＝96件、安全マージ（未入力日のみ追加）で反映。既存値との衝突は無く、全件新規追加。これで9月度は13日分まで揃った。"
   },
+  {
+    date: "2026-09-14",
+    author: "Claude",
+    content: "上記の9月13日分追加時に、seedNewBuActuals9のバージョン番号を上げ忘れており、既にバージョン3を実行済みの端末では13日分のデータが配信されない不具合があった（バージョンガードにより関数の中身が一切実行されないため）。ライフスタイル・カルチャー・ペット・レディース&メンズ・シューズ&服飾の5BUだけ画面上13日分の進捗になっていたのは、その5BUのみ別途手入力があったためと推測される。seedNewBuActuals9のバージョンを4に更新し、再デプロイ後に全端末へ13日分が配信されるようにした。"
+  },
 ];
 
 function renderChangelog(){
@@ -6056,7 +6061,7 @@ function seedNewBuActuals8(){
 /* 2026年9月度の実績を初回投入する。8月度と同じ「まだ実績が入力されていない日に
    だけ追加する」安全な方式。この関数もPull完了後にのみ呼び出すこと */
 function seedNewBuActuals9(){
-  const VERSION = "3";
+  const VERSION = "4";
   const verKey = "sbu2_newbu_actuals9_seed_version";
   if(localStorage.getItem(verKey) === VERSION) return;
   const m = 9;
